@@ -60,20 +60,39 @@ ira is designed to be a unified application that handles all aspects of the iRac
 
 ```
 ira/
-├── src/           # Source files
-├── include/       # Header files
-├── lib/           # Third-party libraries
-├── docs/          # Documentation
-├── tests/         # Test files
-└── tools/         # Build and utility scripts
+├── src/
+│   ├── main.c              # Entry point
+│   └── irsdk/              # iRacing SDK integration (pure C)
+│       ├── irsdk.c         # SDK implementation
+│       ├── irsdk.h         # Public API
+│       └── irsdk_defines.h # Constants and data structures
+├── include/                # Public headers
+├── data/                   # Data files
+├── build/                  # Build output (generated)
+├── meson.build             # Build configuration
+├── LICENSE                 # Source Available License
+├── CLA.md                  # Contributor License Agreement
+└── CONTRIBUTORS            # Signed contributors
 ```
 
 ## Building
 
+Requires: Meson, Ninja (or Visual Studio), C compiler (MSVC recommended)
+
 ```bash
+# Install build tools (if needed)
+python -m pip install meson ninja
+
+# Setup and build (with Ninja)
 meson setup build
 meson compile -C build
+
+# Or with Visual Studio backend
+meson setup build --backend=vs
+meson compile -C build
 ```
+
+The executable will be at `build/ira.exe`.
 
 ## Development Guidelines
 

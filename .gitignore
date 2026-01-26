@@ -1,0 +1,30 @@
+# Build output
+build/
+builddir/
+
+# IDE and editor files
+.vs/
+.vscode/
+*.suo
+*.user
+*.sln.docstates
+
+# Compiled binaries
+*.exe
+*.dll
+*.obj
+*.o
+*.a
+*.lib
+*.pdb
+*.ilk
+*.exp
+
+# Meson
+.mesonpy/
+meson-info/
+meson-logs/
+meson-private/
+
+# Claude Code
+.claude/
