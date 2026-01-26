@@ -1,0 +1,88 @@
+ira - iRacing Application
+Source Available License
+
+Copyright (c) 2026 Christopher Griffiths
+All Rights Reserved.
+
+TERMS AND CONDITIONS
+
+1. DEFINITIONS
+
+   "Software" refers to the ira application, including all source code,
+   documentation, and associated files in this repository.
+
+   "Personal Use" means use by an individual for non-commercial purposes,
+   including learning, personal projects, and private entertainment.
+
+   "Commercial Use" means any redistribution, sale, or distribution of
+   compiled binaries or derivative works to third parties, whether for
+   payment or free of charge.
+
+   "You" refers to any individual or entity exercising permissions granted
+   by this license.
+
+2. GRANT OF RIGHTS FOR PERSONAL USE
+
+   Subject to the terms of this license, you are granted the following
+   rights for Personal Use only:
+
+   a) To view, read, and study the source code.
+
+   b) To modify the source code for your own Personal Use.
+
+   c) To compile the Software and run it for your own Personal Use.
+
+   d) To share modified source code with other individuals for their
+      Personal Use, provided that:
+      - Clear attribution to the original project is maintained
+      - This license file is included with any shared source code
+      - Recipients are made aware of these license terms
+
+3. RESTRICTIONS
+
+   Without a separate commercial license from the copyright holder:
+
+   a) You may NOT redistribute compiled binaries to any third party.
+
+   b) You may NOT sell, sublicense, or commercially distribute the
+      Software or any derivative works.
+
+   c) You may NOT use the Software as part of a commercial product
+      or service offered to others.
+
+   d) You may NOT remove or alter any copyright notices, license
+      information, or attribution requirements.
+
+4. COMMERCIAL LICENSING
+
+   Commercial use of this Software requires a separate license agreement
+   with the copyright holder. This includes but is not limited to:
+
+   - Distributing compiled binaries (free or paid)
+   - Including the Software in commercial products
+   - Offering services based on the Software
+
+   Contact the copyright holder for commercial licensing inquiries.
+
+5. CONTRIBUTIONS
+
+   Any contributions to this project require a signed Contributor License
+   Agreement (CLA) that assigns appropriate rights to the copyright holder.
+   By submitting a pull request or other contribution, you agree to sign
+   the CLA before your contribution can be accepted.
+
+6. DISCLAIMER OF WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+   THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+   OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+7. TERMINATION
+
+   This license automatically terminates if you violate any of its terms.
+   Upon termination, you must cease all use of the Software and destroy
+   any copies in your possession.
