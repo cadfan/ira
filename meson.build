@@ -31,6 +31,19 @@ util_sources = files(
   'src/util/config.c',
 )
 
+data_sources = files(
+  'src/data/models.c',
+  'src/data/database.c',
+)
+
+filter_sources = files(
+  'src/filter/race_filter.c',
+)
+
+api_sources = files(
+  'src/api/iracing_api.c',
+)
+
 launcher_sources = files(
   'src/launcher/launcher.c',
 )
@@ -48,7 +61,7 @@ inc_dirs = include_directories('src')
 
 # Build the executable
 ira_exe = executable('ira',
-  main_sources + irsdk_sources + util_sources + launcher_sources + telemetry_sources,
+  main_sources + irsdk_sources + util_sources + data_sources + filter_sources + api_sources + launcher_sources + telemetry_sources,
   include_directories : inc_dirs,
   dependencies : windows_deps,
   install : true,
