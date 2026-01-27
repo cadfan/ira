@@ -17,6 +17,7 @@
 #include "irsdk/yaml_parser.h"
 #include "util/config.h"
 #include "telemetry/telemetry_log.h"
+#include "launcher/launcher.h"
 
 /* Version info */
 #define IRA_VERSION_MAJOR   0
@@ -33,6 +34,13 @@ static void signal_handler(int sig)
     g_running = false;
     printf("\nShutting down...\n");
 }
+
+/* Application state for launcher integration */
+typedef enum {
+    STATE_WAITING,      /* Waiting for iRacing */
+    STATE_CONNECTED,    /* iRacing running, not in session */
+    STATE_IN_SESSION    /* In car/session with telemetry */
+} ira_state;
 
 /* Convert meters per second to km/h */
 static float mps_to_kph(float mps)
@@ -217,12 +225,142 @@ static void print_usage(const char *program_name)
 {
     printf("Usage: %s [options]\n\n", program_name);
     printf("Options:\n");
-    printf("  -h, --help        Show this help message\n");
-    printf("  -l, --log         Enable telemetry logging to CSV\n");
-    printf("  -m, --metric      Use metric units (default)\n");
-    printf("  -i, --imperial    Use imperial units\n");
-    printf("  --log-dir <path>  Set telemetry log directory\n");
+    printf("  -h, --help              Show this help message\n");
+    printf("  -l, --log               Enable telemetry logging to CSV\n");
+    printf("  -m, --metric            Use metric units (default)\n");
+    printf("  -i, --imperial          Use imperial units\n");
+    printf("  --log-dir <path>        Set telemetry log directory\n");
+    printf("  --launch-apps           Launch all manual-trigger apps and exit\n");
+    printf("  --list-apps             List configured apps and status\n");
+    printf("  --add-app <name> <path> Add a new app to launch on iRacing connect\n");
     printf("\n");
+}
+
+/* List all configured apps and their status */
+static void list_apps(app_launcher *launcher)
+{
+    int count = launcher_get_app_count(launcher);
+    if (count == 0) {
+        printf("No apps configured.\n");
+        printf("Add apps to: %s\n", config_get_apps_path());
+        return;
+    }
+
+    printf("Configured apps (%d):\n", count);
+    printf("----------------------------------------\n");
+
+    for (int i = 0; i < count; i++) {
+        app_profile *app = launcher_get_app_at(launcher, i);
+        if (!app) continue;
+
+        launcher_update_status(launcher);
+
+        printf("%d. %s\n", i + 1, app->name);
+        printf("   Path:    %s\n", app->exe_path);
+        printf("   Trigger: %s\n", launcher_trigger_to_string(app->trigger));
+        printf("   Close:   %s\n", launcher_close_to_string(app->on_close));
+        printf("   Enabled: %s\n", app->enabled ? "yes" : "no");
+        printf("   Status:  %s\n", app->is_running ? "RUNNING" : "stopped");
+        printf("\n");
+    }
+}
+
+/* Launch all manual-trigger apps */
+static void launch_manual_apps(app_launcher *launcher)
+{
+    int count = launcher_get_app_count(launcher);
+    int launched = 0;
+
+    for (int i = 0; i < count; i++) {
+        app_profile *app = launcher_get_app_at(launcher, i);
+        if (!app || !app->enabled || app->trigger != LAUNCH_MANUAL) {
+            continue;
+        }
+
+        printf("Launching %s...", app->name);
+        if (launcher_start_app(launcher, app->name)) {
+            printf(" OK\n");
+            launched++;
+        } else {
+            printf(" FAILED\n");
+        }
+    }
+
+    if (launched == 0) {
+        printf("No manual-trigger apps to launch.\n");
+    } else {
+        printf("\nLaunched %d app(s).\n", launched);
+    }
+}
+
+/* Add a new app to the configuration */
+static bool add_app(app_launcher *launcher, const char *name, const char *exe_path)
+{
+    if (!launcher || !name || !exe_path) return false;
+
+    /* Check if already exists */
+    if (launcher_get_app(launcher, name)) {
+        printf("Error: App '%s' already exists.\n", name);
+        return false;
+    }
+
+    /* Create profile with defaults */
+    app_profile profile;
+    memset(&profile, 0, sizeof(profile));
+
+    strncpy(profile.name, name, sizeof(profile.name) - 1);
+    strncpy(profile.exe_path, exe_path, sizeof(profile.exe_path) - 1);
+    profile.trigger = LAUNCH_ON_CONNECT;
+    profile.on_close = CLOSE_ON_IRACING_EXIT;
+    profile.enabled = true;
+
+    if (!launcher_add_app(launcher, &profile)) {
+        printf("Error: Could not add app.\n");
+        return false;
+    }
+
+    /* Save configuration */
+    if (!launcher_save_config(launcher, config_get_apps_path())) {
+        printf("Error: Could not save configuration.\n");
+        return false;
+    }
+
+    printf("Added '%s' -> %s\n", name, exe_path);
+    printf("Trigger: on_connect, Close: on_iracing_exit\n");
+    printf("Config: %s\n", config_get_apps_path());
+    return true;
+}
+
+/* Create default apps.json with example configuration */
+static void create_default_apps_config(void)
+{
+    const char *apps_path = config_get_apps_path();
+
+    /* Check if file already exists */
+    FILE *f = fopen(apps_path, "r");
+    if (f) {
+        fclose(f);
+        return; /* Already exists */
+    }
+
+    /* Create example configuration */
+    f = fopen(apps_path, "w");
+    if (!f) return;
+
+    fprintf(f, "{\n");
+    fprintf(f, "  \"apps\": [\n");
+    fprintf(f, "    {\n");
+    fprintf(f, "      \"name\": \"Example App\",\n");
+    fprintf(f, "      \"exe_path\": \"C:\\\\Path\\\\To\\\\App.exe\",\n");
+    fprintf(f, "      \"args\": \"\",\n");
+    fprintf(f, "      \"working_dir\": \"\",\n");
+    fprintf(f, "      \"trigger\": \"on_connect\",\n");
+    fprintf(f, "      \"on_close\": \"on_iracing_exit\",\n");
+    fprintf(f, "      \"enabled\": false\n");
+    fprintf(f, "    }\n");
+    fprintf(f, "  ]\n");
+    fprintf(f, "}\n");
+    fclose(f);
 }
 
 int main(int argc, char *argv[])
@@ -236,6 +374,11 @@ int main(int argc, char *argv[])
 
     /* Parse command line arguments */
     bool enable_logging = cfg.telemetry_logging_enabled;
+    bool do_launch_apps = false;
+    bool do_list_apps = false;
+    bool do_add_app = false;
+    const char *add_app_name = NULL;
+    const char *add_app_path = NULL;
     char log_dir[260];
     strncpy(log_dir, cfg.telemetry_log_path, sizeof(log_dir) - 1);
 
@@ -251,14 +394,68 @@ int main(int argc, char *argv[])
             cfg.use_metric_units = false;
         } else if (strcmp(argv[i], "--log-dir") == 0 && i + 1 < argc) {
             strncpy(log_dir, argv[++i], sizeof(log_dir) - 1);
+        } else if (strcmp(argv[i], "--launch-apps") == 0) {
+            do_launch_apps = true;
+        } else if (strcmp(argv[i], "--list-apps") == 0) {
+            do_list_apps = true;
+        } else if (strcmp(argv[i], "--add-app") == 0 && i + 2 < argc) {
+            do_add_app = true;
+            add_app_name = argv[++i];
+            add_app_path = argv[++i];
         }
+    }
+
+    /* Create default apps config if it doesn't exist */
+    create_default_apps_config();
+
+    /* Create and load app launcher */
+    app_launcher *launcher = launcher_create();
+    if (launcher) {
+        launcher_load_config(launcher, config_get_apps_path());
+    }
+
+    /* Handle --add-app command */
+    if (do_add_app) {
+        if (launcher) {
+            add_app(launcher, add_app_name, add_app_path);
+            launcher_destroy(launcher);
+        } else {
+            printf("Error: Could not create launcher\n");
+        }
+        return 0;
+    }
+
+    /* Handle --list-apps command */
+    if (do_list_apps) {
+        if (launcher) {
+            list_apps(launcher);
+            launcher_destroy(launcher);
+        } else {
+            printf("Error: Could not create launcher\n");
+        }
+        return 0;
+    }
+
+    /* Handle --launch-apps command */
+    if (do_launch_apps) {
+        if (launcher) {
+            launch_manual_apps(launcher);
+            launcher_destroy(launcher);
+        } else {
+            printf("Error: Could not create launcher\n");
+        }
+        return 0;
     }
 
     /* Set up signal handler */
     signal(SIGINT, signal_handler);
 
     printf("Config: %s\n", config_get_default_path());
-    printf("Data:   %s\n\n", config_get_data_path());
+    printf("Data:   %s\n", config_get_data_path());
+    printf("Apps:   %s\n\n", config_get_apps_path());
+
+    /* Initialize state tracking for launcher */
+    ira_state current_state = STATE_WAITING;
 
     printf("Waiting for iRacing...\n");
 
@@ -270,10 +467,18 @@ int main(int argc, char *argv[])
     }
 
     if (!g_running) {
+        launcher_destroy(launcher);
         return 0;
     }
 
     printf("\nConnected to iRacing!\n");
+
+    /* State transition: WAITING -> CONNECTED */
+    current_state = STATE_CONNECTED;
+    if (launcher) {
+        launcher_start_all(launcher, LAUNCH_ON_CONNECT);
+    }
+
     printf("Waiting for session data (enter a session with a car)...\n");
 
     /* Wait for data to be available - need actual telemetry data */
@@ -318,10 +523,17 @@ int main(int argc, char *argv[])
     if (!g_running) {
         free(data);
         irsdk_shutdown();
+        launcher_destroy(launcher);
         return 0;
     }
 
     printf("\nSession data available!\n");
+
+    /* State transition: CONNECTED -> IN_SESSION */
+    current_state = STATE_IN_SESSION;
+    if (launcher) {
+        launcher_start_all(launcher, LAUNCH_ON_SESSION);
+    }
 
     /* Parse and display session info */
     SessionInfo session_info = {0};
@@ -382,6 +594,12 @@ int main(int argc, char *argv[])
         if (!irsdk_is_connected()) {
             printf("\n\nDisconnected from iRacing. Waiting to reconnect...\n");
 
+            /* State transition: IN_SESSION/CONNECTED -> WAITING */
+            current_state = STATE_WAITING;
+            if (launcher) {
+                launcher_stop_all(launcher, CLOSE_ON_IRACING_EXIT);
+            }
+
             /* Stop logging during disconnect */
             if (logger) {
                 telem_log_stop(logger);
@@ -396,10 +614,23 @@ int main(int argc, char *argv[])
             while (g_running && !irsdk_is_connected()) {
                 if (irsdk_wait_for_data(1000, NULL)) {
                     printf("Reconnected!\n\n");
+
+                    /* State transition: WAITING -> CONNECTED */
+                    current_state = STATE_CONNECTED;
+                    if (launcher) {
+                        launcher_start_all(launcher, LAUNCH_ON_CONNECT);
+                    }
+
                     /* Reinitialize offsets in case variables changed */
                     if (!init_telemetry_offsets(&offsets)) {
                         printf("Error: Could not reinitialize telemetry offsets\n");
                         break;
+                    }
+
+                    /* State transition: CONNECTED -> IN_SESSION */
+                    current_state = STATE_IN_SESSION;
+                    if (launcher) {
+                        launcher_start_all(launcher, LAUNCH_ON_SESSION);
                     }
 
                     /* Re-parse session info */
@@ -440,6 +671,12 @@ int main(int argc, char *argv[])
     /* Save configuration */
     cfg.telemetry_logging_enabled = enable_logging;
     config_save_default(&cfg);
+
+    /* Stop all apps that should close on ira exit and cleanup launcher */
+    if (launcher) {
+        launcher_stop_all(launcher, CLOSE_ON_IRA_EXIT);
+        launcher_destroy(launcher);
+    }
 
     free(data);
     irsdk_shutdown();

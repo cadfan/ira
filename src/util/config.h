@@ -69,4 +69,10 @@ const char *config_get_data_path(void);
  */
 bool config_ensure_data_dir(void);
 
+/*
+ * Get the default apps configuration file path.
+ * Returns pointer to static buffer.
+ */
+const char *config_get_apps_path(void);
+
 #endif /* IRA_CONFIG_H */

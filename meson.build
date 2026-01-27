@@ -31,6 +31,10 @@ util_sources = files(
   'src/util/config.c',
 )
 
+launcher_sources = files(
+  'src/launcher/launcher.c',
+)
+
 telemetry_sources = files(
   'src/telemetry/telemetry_log.c',
 )
@@ -44,7 +48,7 @@ inc_dirs = include_directories('src')
 
 # Build the executable
 ira_exe = executable('ira',
-  main_sources + irsdk_sources + util_sources + telemetry_sources,
+  main_sources + irsdk_sources + util_sources + launcher_sources + telemetry_sources,
   include_directories : inc_dirs,
   dependencies : windows_deps,
   install : true,

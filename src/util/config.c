@@ -20,9 +20,10 @@
 /* Static buffers for paths */
 static char g_config_path[MAX_PATH] = {0};
 static char g_data_path[MAX_PATH] = {0};
+static char g_apps_path[MAX_PATH] = {0};
 
 /*
- * Initialize paths
+ * Initialize paths - uses executable directory for portability
  */
 static void init_paths(void)
 {
@@ -30,16 +31,26 @@ static void init_paths(void)
         return; /* Already initialized */
     }
 
-    /* Get AppData folder */
-    char appdata[MAX_PATH];
-    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appdata))) {
-        snprintf(g_data_path, MAX_PATH, "%s\\ira", appdata);
-        snprintf(g_config_path, MAX_PATH, "%s\\ira\\config.json", appdata);
-    } else {
-        /* Fallback to current directory */
-        strcpy(g_data_path, ".");
-        strcpy(g_config_path, ".\\config.json");
+    /* Get the executable's directory */
+    char exe_path[MAX_PATH];
+    DWORD len = GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+
+    if (len > 0 && len < MAX_PATH) {
+        /* Find last backslash to get directory */
+        char *last_slash = strrchr(exe_path, '\\');
+        if (last_slash) {
+            *last_slash = '\0'; /* Truncate to directory */
+            strncpy(g_data_path, exe_path, MAX_PATH - 1);
+            snprintf(g_config_path, MAX_PATH, "%s\\config.json", exe_path);
+            snprintf(g_apps_path, MAX_PATH, "%s\\apps.json", exe_path);
+            return;
+        }
     }
+
+    /* Fallback to current directory */
+    strcpy(g_data_path, ".");
+    strcpy(g_config_path, ".\\config.json");
+    strcpy(g_apps_path, ".\\apps.json");
 }
 
 /*
@@ -242,4 +253,13 @@ bool config_save(const ira_config *cfg, const char *filename)
 bool config_save_default(const ira_config *cfg)
 {
     return config_save(cfg, config_get_default_path());
+}
+
+/*
+ * Get default apps configuration file path
+ */
+const char *config_get_apps_path(void)
+{
+    init_paths();
+    return g_apps_path;
 }
