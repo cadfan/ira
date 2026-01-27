@@ -18,6 +18,10 @@
 #include "util/config.h"
 #include "telemetry/telemetry_log.h"
 #include "launcher/launcher.h"
+#include "data/database.h"
+#include "data/models.h"
+#include "filter/race_filter.h"
+#include "api/iracing_api.h"
 
 /* Version info */
 #define IRA_VERSION_MAJOR   0
@@ -230,9 +234,17 @@ static void print_usage(const char *program_name)
     printf("  -m, --metric            Use metric units (default)\n");
     printf("  -i, --imperial          Use imperial units\n");
     printf("  --log-dir <path>        Set telemetry log directory\n");
+    printf("\n");
+    printf("App Launcher:\n");
     printf("  --launch-apps           Launch all manual-trigger apps and exit\n");
     printf("  --list-apps             List configured apps and status\n");
     printf("  --add-app <name> <path> Add a new app to launch on iRacing connect\n");
+    printf("\n");
+    printf("Race Filter:\n");
+    printf("  --races                 Show filtered races for current week\n");
+    printf("  --races-all             Show all races (ignore filters)\n");
+    printf("  --filter-status         Show current filter settings\n");
+    printf("  --sync                  Sync data from iRacing API (requires auth)\n");
     printf("\n");
 }
 
@@ -363,6 +375,290 @@ static void create_default_apps_config(void)
     fclose(f);
 }
 
+/* Display filter status/settings */
+static void show_filter_status(ira_database *db)
+{
+    if (!db) {
+        printf("Error: Database not initialized\n");
+        return;
+    }
+
+    ira_filter *f = &db->filter;
+
+    printf("Race Filter Settings\n");
+    printf("========================================\n");
+    printf("Owned content only: %s\n", f->owned_content_only ? "yes" : "no");
+    printf("License range:      %s - %s\n",
+           license_to_string(f->min_license),
+           license_to_string(f->max_license));
+
+    printf("Categories:         ");
+    if (f->category_count == 0) {
+        printf("all");
+    } else {
+        for (int i = 0; i < f->category_count; i++) {
+            if (i > 0) printf(", ");
+            printf("%s", category_to_string(f->categories[i]));
+        }
+    }
+    printf("\n");
+
+    printf("Setup type:         ");
+    if (f->fixed_setup_only) printf("fixed only");
+    else if (f->open_setup_only) printf("open only");
+    else printf("any");
+    printf("\n");
+
+    printf("Official only:      %s\n", f->official_only ? "yes" : "no");
+
+    printf("Race duration:      ");
+    if (f->min_race_mins > 0 || f->max_race_mins > 0) {
+        if (f->min_race_mins > 0) printf("%d min", f->min_race_mins);
+        else printf("any");
+        printf(" - ");
+        if (f->max_race_mins > 0) printf("%d min", f->max_race_mins);
+        else printf("any");
+    } else {
+        printf("any");
+    }
+    printf("\n");
+
+    printf("Excluded series:    %d\n", f->excluded_series_count);
+    printf("Excluded tracks:    %d\n", f->excluded_track_count);
+    printf("========================================\n\n");
+
+    printf("Data Status:\n");
+    printf("  Tracks:  %d loaded", db->track_count);
+    if (db->tracks_updated > 0) {
+        printf(" (updated: %s", ctime(&db->tracks_updated));
+        /* ctime adds newline, remove it */
+        printf("\b)");
+    }
+    printf("\n");
+
+    printf("  Cars:    %d loaded", db->car_count);
+    if (db->cars_updated > 0) {
+        printf(" (updated: %s", ctime(&db->cars_updated));
+        printf("\b)");
+    }
+    printf("\n");
+
+    printf("  Seasons: %d loaded", db->season_count);
+    if (db->seasons_updated > 0) {
+        printf(" (updated: %s", ctime(&db->seasons_updated));
+        printf("\b)");
+    }
+    printf("\n");
+
+    printf("  Owned cars:   %d\n", db->owned.owned_car_count);
+    printf("  Owned tracks: %d\n", db->owned.owned_track_count);
+    printf("\n");
+
+    printf("Config file: %s\n", database_get_filter_path());
+}
+
+/* Display filtered races */
+static void show_races(ira_database *db, bool show_all)
+{
+    if (!db) {
+        printf("Error: Database not initialized\n");
+        return;
+    }
+
+    if (db->season_count == 0) {
+        printf("No season data loaded.\n");
+        printf("Use --sync to fetch data from iRacing API (requires authentication).\n");
+        printf("Or manually place data files in: %s\n", database_get_seasons_path());
+        return;
+    }
+
+    /* Create filter results */
+    filter_results *results = filter_results_create();
+    if (!results) {
+        printf("Error: Could not create filter results\n");
+        return;
+    }
+
+    /* Temporarily disable filter if showing all */
+    ira_filter saved_filter;
+    if (show_all) {
+        saved_filter = db->filter;
+        db->filter.owned_content_only = false;
+        db->filter.category_count = 0;
+        db->filter.min_license = LICENSE_ROOKIE;
+        db->filter.max_license = LICENSE_PRO_WC;
+        db->filter.fixed_setup_only = false;
+        db->filter.open_setup_only = false;
+        db->filter.official_only = false;
+        db->filter.min_race_mins = 0;
+        db->filter.max_race_mins = 0;
+    }
+
+    /* Apply filter */
+    filter_apply(db, results);
+
+    /* Restore filter if we modified it */
+    if (show_all) {
+        db->filter = saved_filter;
+    }
+
+    /* Sort by series name */
+    filter_results_sort(results, SORT_BY_CATEGORY, true);
+
+    /* Display results */
+    printf("Races for Current Week\n");
+    printf("========================================\n");
+
+    if (results->race_count == 0) {
+        printf("No races found.\n");
+    } else {
+        race_category last_cat = CATEGORY_UNKNOWN;
+
+        for (int i = 0; i < results->race_count; i++) {
+            filtered_race *race = &results->races[i];
+
+            /* Skip failed matches unless showing all */
+            if (!show_all && race->match != MATCH_OK) {
+                continue;
+            }
+
+            /* Print category header */
+            race_category cat = race->series ? race->series->category : CATEGORY_UNKNOWN;
+            if (cat != last_cat) {
+                printf("\n--- %s ---\n", category_to_string(cat));
+                last_cat = cat;
+            }
+
+            /* Series name */
+            const char *series_name = race->series ? race->series->series_name : "Unknown Series";
+            printf("\n%s\n", series_name);
+
+            /* Track info */
+            if (race->track) {
+                printf("  Track:    %s", race->track->track_name);
+                if (race->track->config_name[0]) {
+                    printf(" (%s)", race->track->config_name);
+                }
+                printf("\n");
+            } else if (race->week) {
+                printf("  Track:    %s", race->week->track_name);
+                if (race->week->config_name[0]) {
+                    printf(" (%s)", race->week->config_name);
+                }
+                printf("\n");
+            }
+
+            /* Duration */
+            char duration[32];
+            if (race->week) {
+                filter_format_duration(race->week, duration, sizeof(duration));
+                printf("  Duration: %s\n", duration);
+            }
+
+            /* License */
+            if (race->series) {
+                printf("  License:  %s\n", license_to_string(race->series->min_license));
+            }
+
+            /* Setup type */
+            if (race->season) {
+                printf("  Setup:    %s\n", race->season->fixed_setup ? "Fixed" : "Open");
+            }
+
+            /* Ownership status */
+            printf("  Owned:    Car: %s, Track: %s\n",
+                   race->owns_car ? "yes" : "NO",
+                   race->owns_track ? "yes" : "NO");
+
+            /* Filter status (if showing all) */
+            if (show_all && race->match != MATCH_OK) {
+                printf("  Filter:   %s\n", filter_match_to_string(race->match));
+            }
+        }
+    }
+
+    printf("\n========================================\n");
+    printf("Total: %d checked, %d passed filter\n",
+           results->total_checked, results->passed_count);
+
+    if (results->failed_ownership > 0) {
+        printf("  %d failed: missing content\n", results->failed_ownership);
+    }
+    if (results->failed_category > 0) {
+        printf("  %d failed: wrong category\n", results->failed_category);
+    }
+    if (results->failed_license > 0) {
+        printf("  %d failed: license mismatch\n", results->failed_license);
+    }
+    if (results->failed_other > 0) {
+        printf("  %d failed: other reasons\n", results->failed_other);
+    }
+
+    filter_results_destroy(results);
+}
+
+/* Sync data from iRacing API */
+static void sync_data(ira_database *db)
+{
+    if (!db) {
+        printf("Error: Database not initialized\n");
+        return;
+    }
+
+    printf("Syncing data from iRacing API...\n\n");
+
+    iracing_api *api = api_create();
+    if (!api) {
+        printf("Error: Could not create API client\n");
+        return;
+    }
+
+    /* Try to load saved tokens */
+    /* TODO: token file path */
+
+    /* Authenticate */
+    api_error err = api_authenticate(api);
+    if (err != API_OK) {
+        printf("Authentication: %s\n", api_get_last_error(api));
+        printf("\nNote: iRacing API access requires OAuth approval.\n");
+        printf("Once approved, credentials can be set via config file.\n");
+        api_destroy(api);
+        return;
+    }
+
+    /* Fetch data */
+    printf("Fetching cars...\n");
+    err = api_fetch_cars(api, db);
+    printf("  %s\n", err == API_OK ? "OK" : api_error_string(err));
+
+    printf("Fetching tracks...\n");
+    err = api_fetch_tracks(api, db);
+    printf("  %s\n", err == API_OK ? "OK" : api_error_string(err));
+
+    printf("Fetching series...\n");
+    err = api_fetch_series(api, db);
+    printf("  %s\n", err == API_OK ? "OK" : api_error_string(err));
+
+    printf("Fetching seasons...\n");
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    int year = tm->tm_year + 1900;
+    int quarter = (tm->tm_mon / 3) + 1;
+    err = api_fetch_seasons(api, db, year, quarter);
+    printf("  %s\n", err == API_OK ? "OK" : api_error_string(err));
+
+    printf("Fetching owned content...\n");
+    err = api_fetch_owned_content(api, db);
+    printf("  %s\n", err == API_OK ? "OK" : api_error_string(err));
+
+    /* Save data */
+    printf("\nSaving data...\n");
+    database_save_all(db);
+
+    api_destroy(api);
+    printf("\nSync complete.\n");
+}
+
 int main(int argc, char *argv[])
 {
     print_banner();
@@ -377,6 +673,10 @@ int main(int argc, char *argv[])
     bool do_launch_apps = false;
     bool do_list_apps = false;
     bool do_add_app = false;
+    bool do_show_races = false;
+    bool do_show_races_all = false;
+    bool do_filter_status = false;
+    bool do_sync = false;
     const char *add_app_name = NULL;
     const char *add_app_path = NULL;
     char log_dir[260];
@@ -402,6 +702,14 @@ int main(int argc, char *argv[])
             do_add_app = true;
             add_app_name = argv[++i];
             add_app_path = argv[++i];
+        } else if (strcmp(argv[i], "--races") == 0) {
+            do_show_races = true;
+        } else if (strcmp(argv[i], "--races-all") == 0) {
+            do_show_races_all = true;
+        } else if (strcmp(argv[i], "--filter-status") == 0) {
+            do_filter_status = true;
+        } else if (strcmp(argv[i], "--sync") == 0) {
+            do_sync = true;
         }
     }
 
@@ -444,6 +752,32 @@ int main(int argc, char *argv[])
         } else {
             printf("Error: Could not create launcher\n");
         }
+        return 0;
+    }
+
+    /* Handle race filter commands */
+    if (do_show_races || do_show_races_all || do_filter_status || do_sync) {
+        /* Create and load database */
+        ira_database *db = database_create();
+        if (!db) {
+            printf("Error: Could not create database\n");
+            launcher_destroy(launcher);
+            return 1;
+        }
+
+        /* Load cached data */
+        database_load_all(db);
+
+        if (do_filter_status) {
+            show_filter_status(db);
+        } else if (do_sync) {
+            sync_data(db);
+        } else if (do_show_races || do_show_races_all) {
+            show_races(db, do_show_races_all);
+        }
+
+        database_destroy(db);
+        launcher_destroy(launcher);
         return 0;
     }
 
