@@ -26,6 +26,20 @@ typedef enum {
     CLOSE_NEVER             /* Leave running */
 } close_behavior;
 
+/* Filter mode for car/track conditions */
+typedef enum {
+    FILTER_NONE,     /* No filtering - always matches */
+    FILTER_INCLUDE,  /* Only launch if car/track is in list */
+    FILTER_EXCLUDE   /* Launch unless car/track is in list */
+} filter_mode;
+
+/* Car/track filter configuration */
+typedef struct {
+    filter_mode mode;
+    int *ids;        /* Array of car/track IDs */
+    int count;       /* Number of IDs in array */
+} content_filter;
+
 /* Application profile configuration */
 typedef struct {
     char name[64];              /* Display name */
@@ -35,6 +49,10 @@ typedef struct {
     launch_trigger trigger;
     close_behavior on_close;
     bool enabled;
+
+    /* Content filters for conditional launching */
+    content_filter car_filter;
+    content_filter track_filter;
 
     /* Runtime state (not persisted) */
     HANDLE process_handle;
@@ -94,6 +112,12 @@ void launcher_start_all(app_launcher *launcher, launch_trigger trigger);
 /* Stop all enabled apps matching the given close behavior. */
 void launcher_stop_all(app_launcher *launcher, close_behavior behavior);
 
+/* Check if app should run given current car/track IDs */
+bool launcher_app_matches_session(const app_profile *app, int car_id, int track_id);
+
+/* Evaluate all apps and start/stop based on session. Returns count of changes. */
+int launcher_update_for_session(app_launcher *launcher, int car_id, int track_id);
+
 /*
  * Status functions
  */
@@ -129,5 +153,11 @@ const char *launcher_close_to_string(close_behavior behavior);
 
 /* Convert string to close_behavior. Returns CLOSE_ON_IRACING_EXIT on invalid input. */
 close_behavior launcher_string_to_close(const char *str);
+
+/* Convert filter_mode enum to string. */
+const char *launcher_filter_to_string(filter_mode mode);
+
+/* Convert string to filter_mode. Returns FILTER_NONE on invalid input. */
+filter_mode launcher_string_to_filter(const char *str);
 
 #endif /* IRA_LAUNCHER_H */

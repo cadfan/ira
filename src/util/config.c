@@ -72,6 +72,30 @@ void config_init_defaults(ira_config *cfg)
     cfg->refresh_rate_hz = 60;
 
     strncpy(cfg->data_path, g_data_path, sizeof(cfg->data_path) - 1);
+
+    /* Launcher defaults */
+    cfg->car_switch_behavior = CAR_SWITCH_AUTO;
+}
+
+/* Convert car_switch_mode enum to string */
+static const char *car_switch_to_string(car_switch_mode mode)
+{
+    switch (mode) {
+        case CAR_SWITCH_AUTO:     return "auto";
+        case CAR_SWITCH_PROMPT:   return "prompt";
+        case CAR_SWITCH_DISABLED: return "disabled";
+        default:                  return "auto";
+    }
+}
+
+/* Convert string to car_switch_mode */
+static car_switch_mode string_to_car_switch(const char *str)
+{
+    if (!str) return CAR_SWITCH_AUTO;
+
+    if (strcmp(str, "prompt") == 0) return CAR_SWITCH_PROMPT;
+    if (strcmp(str, "disabled") == 0) return CAR_SWITCH_DISABLED;
+    return CAR_SWITCH_AUTO;
 }
 
 /*
@@ -182,6 +206,17 @@ bool config_load(ira_config *cfg, const char *filename)
         }
     }
 
+    /* Read launcher settings */
+    json_value *launcher = json_object_get(root, "launcher");
+    if (launcher && json_get_type(launcher) == JSON_OBJECT) {
+        json_value *val;
+
+        val = json_object_get(launcher, "car_switch_behavior");
+        if (val && json_get_type(val) == JSON_STRING) {
+            cfg->car_switch_behavior = string_to_car_switch(json_get_string(val));
+        }
+    }
+
     json_free(root);
     return true;
 }
@@ -238,6 +273,14 @@ bool config_save(const ira_config *cfg, const char *filename)
         json_object_set(general, "data_path",
                        json_new_string(cfg->data_path));
         json_object_set(root, "general", general);
+    }
+
+    /* Launcher settings */
+    json_value *launcher = json_new_object();
+    if (launcher) {
+        json_object_set(launcher, "car_switch_behavior",
+                       json_new_string(car_switch_to_string(cfg->car_switch_behavior)));
+        json_object_set(root, "launcher", launcher);
     }
 
     /* Write to file */

@@ -59,6 +59,57 @@ close_behavior launcher_string_to_close(const char *str)
     return CLOSE_ON_IRACING_EXIT;
 }
 
+const char *launcher_filter_to_string(filter_mode mode)
+{
+    switch (mode) {
+        case FILTER_NONE:    return "none";
+        case FILTER_INCLUDE: return "include";
+        case FILTER_EXCLUDE: return "exclude";
+        default:             return "none";
+    }
+}
+
+filter_mode launcher_string_to_filter(const char *str)
+{
+    if (!str) return FILTER_NONE;
+
+    if (strcmp(str, "include") == 0) return FILTER_INCLUDE;
+    if (strcmp(str, "exclude") == 0) return FILTER_EXCLUDE;
+    return FILTER_NONE;
+}
+
+/*
+ * Filter helper functions
+ */
+
+/* Check if an ID matches a filter */
+static bool filter_matches(const content_filter *filter, int id)
+{
+    if (filter->mode == FILTER_NONE) return true;
+    if (filter->count == 0) return (filter->mode == FILTER_EXCLUDE);
+
+    bool found = false;
+    for (int i = 0; i < filter->count; i++) {
+        if (filter->ids[i] == id) {
+            found = true;
+            break;
+        }
+    }
+
+    return (filter->mode == FILTER_INCLUDE) ? found : !found;
+}
+
+/* Free filter resources */
+static void filter_cleanup(content_filter *filter)
+{
+    if (filter->ids) {
+        free(filter->ids);
+        filter->ids = NULL;
+    }
+    filter->count = 0;
+    filter->mode = FILTER_NONE;
+}
+
 /*
  * Lifecycle functions
  */
@@ -89,12 +140,14 @@ void launcher_destroy(app_launcher *launcher)
     /* Stop all running apps that should close on ira exit */
     launcher_stop_all(launcher, CLOSE_ON_IRA_EXIT);
 
-    /* Close any remaining process handles */
+    /* Close any remaining process handles and free filter resources */
     for (int i = 0; i < launcher->app_count; i++) {
         if (launcher->apps[i].process_handle) {
             CloseHandle(launcher->apps[i].process_handle);
             launcher->apps[i].process_handle = NULL;
         }
+        filter_cleanup(&launcher->apps[i].car_filter);
+        filter_cleanup(&launcher->apps[i].track_filter);
     }
 
     free(launcher->apps);
@@ -153,6 +206,10 @@ bool launcher_remove_app(app_launcher *launcher, const char *name)
             if (launcher->apps[i].process_handle) {
                 CloseHandle(launcher->apps[i].process_handle);
             }
+
+            /* Free filter resources */
+            filter_cleanup(&launcher->apps[i].car_filter);
+            filter_cleanup(&launcher->apps[i].track_filter);
 
             /* Shift remaining apps down */
             for (int j = i; j < launcher->app_count - 1; j++) {
@@ -343,6 +400,57 @@ void launcher_stop_all(app_launcher *launcher, close_behavior behavior)
     }
 }
 
+bool launcher_app_matches_session(const app_profile *app, int car_id, int track_id)
+{
+    if (!app) return false;
+
+    /* Check car filter */
+    if (!filter_matches(&app->car_filter, car_id)) {
+        return false;
+    }
+
+    /* Check track filter */
+    if (!filter_matches(&app->track_filter, track_id)) {
+        return false;
+    }
+
+    return true;
+}
+
+int launcher_update_for_session(app_launcher *launcher, int car_id, int track_id)
+{
+    if (!launcher) return 0;
+
+    int changes = 0;
+    launcher_update_status(launcher);
+
+    for (int i = 0; i < launcher->app_count; i++) {
+        app_profile *app = &launcher->apps[i];
+
+        /* Only consider enabled apps with session triggers */
+        if (!app->enabled || app->trigger != LAUNCH_ON_SESSION) {
+            continue;
+        }
+
+        bool should_run = launcher_app_matches_session(app, car_id, track_id);
+        bool is_running = app->is_running;
+
+        if (should_run && !is_running) {
+            /* Start the app */
+            if (launcher_start_app(launcher, app->name)) {
+                changes++;
+            }
+        } else if (!should_run && is_running) {
+            /* Stop the app */
+            if (launcher_stop_app(launcher, app->name)) {
+                changes++;
+            }
+        }
+    }
+
+    return changes;
+}
+
 /*
  * Status functions
  */
@@ -478,7 +586,63 @@ bool launcher_load_config(app_launcher *launcher, const char *filename)
             profile.enabled = true;
         }
 
+        /* Parse car filter */
+        json_value *car_filter = json_object_get(app_obj, "car_filter");
+        if (car_filter && json_get_type(car_filter) == JSON_OBJECT) {
+            val = json_object_get(car_filter, "mode");
+            if (val && json_get_type(val) == JSON_STRING) {
+                profile.car_filter.mode = launcher_string_to_filter(json_get_string(val));
+            }
+
+            json_value *ids_arr = json_object_get(car_filter, "ids");
+            if (ids_arr && json_get_type(ids_arr) == JSON_ARRAY) {
+                int id_count = json_array_length(ids_arr);
+                if (id_count > 0) {
+                    profile.car_filter.ids = (int *)malloc(id_count * sizeof(int));
+                    if (profile.car_filter.ids) {
+                        profile.car_filter.count = 0;
+                        for (int j = 0; j < id_count; j++) {
+                            json_value *id_val = json_array_get(ids_arr, j);
+                            if (id_val && json_get_type(id_val) == JSON_NUMBER) {
+                                profile.car_filter.ids[profile.car_filter.count++] = json_get_int(id_val);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /* Parse track filter */
+        json_value *track_filter = json_object_get(app_obj, "track_filter");
+        if (track_filter && json_get_type(track_filter) == JSON_OBJECT) {
+            val = json_object_get(track_filter, "mode");
+            if (val && json_get_type(val) == JSON_STRING) {
+                profile.track_filter.mode = launcher_string_to_filter(json_get_string(val));
+            }
+
+            json_value *ids_arr = json_object_get(track_filter, "ids");
+            if (ids_arr && json_get_type(ids_arr) == JSON_ARRAY) {
+                int id_count = json_array_length(ids_arr);
+                if (id_count > 0) {
+                    profile.track_filter.ids = (int *)malloc(id_count * sizeof(int));
+                    if (profile.track_filter.ids) {
+                        profile.track_filter.count = 0;
+                        for (int j = 0; j < id_count; j++) {
+                            json_value *id_val = json_array_get(ids_arr, j);
+                            if (id_val && json_get_type(id_val) == JSON_NUMBER) {
+                                profile.track_filter.ids[profile.track_filter.count++] = json_get_int(id_val);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         launcher_add_app(launcher, &profile);
+
+        /* Free temporary filter allocations (launcher_add_app copies, so we need to track separately) */
+        /* Note: launcher_add_app does a shallow copy, so we should NOT free here */
+        /* The filter memory is now owned by the launcher */
     }
 
     json_free(root);
@@ -513,6 +677,36 @@ bool launcher_save_config(const app_launcher *launcher, const char *filename)
         json_object_set(app_obj, "on_close",
                        json_new_string(launcher_close_to_string(app->on_close)));
         json_object_set(app_obj, "enabled", json_new_bool(app->enabled));
+
+        /* Write car filter */
+        json_value *car_filter_obj = json_new_object();
+        if (car_filter_obj) {
+            json_object_set(car_filter_obj, "mode",
+                           json_new_string(launcher_filter_to_string(app->car_filter.mode)));
+            json_value *car_ids_arr = json_new_array();
+            if (car_ids_arr) {
+                for (int j = 0; j < app->car_filter.count; j++) {
+                    json_array_push(car_ids_arr, json_new_number(app->car_filter.ids[j]));
+                }
+                json_object_set(car_filter_obj, "ids", car_ids_arr);
+            }
+            json_object_set(app_obj, "car_filter", car_filter_obj);
+        }
+
+        /* Write track filter */
+        json_value *track_filter_obj = json_new_object();
+        if (track_filter_obj) {
+            json_object_set(track_filter_obj, "mode",
+                           json_new_string(launcher_filter_to_string(app->track_filter.mode)));
+            json_value *track_ids_arr = json_new_array();
+            if (track_ids_arr) {
+                for (int j = 0; j < app->track_filter.count; j++) {
+                    json_array_push(track_ids_arr, json_new_number(app->track_filter.ids[j]));
+                }
+                json_object_set(track_filter_obj, "ids", track_ids_arr);
+            }
+            json_object_set(app_obj, "track_filter", track_filter_obj);
+        }
 
         json_array_push(apps_array, app_obj);
     }

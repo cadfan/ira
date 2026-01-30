@@ -10,6 +10,13 @@
 
 #include <stdbool.h>
 
+/* Car switch behavior setting */
+typedef enum {
+    CAR_SWITCH_AUTO,     /* Automatically switch apps */
+    CAR_SWITCH_PROMPT,   /* Show prompt when car changes */
+    CAR_SWITCH_DISABLED  /* Don't react to car changes */
+} car_switch_mode;
+
 /* Configuration structure */
 typedef struct {
     /* Telemetry settings */
@@ -23,6 +30,9 @@ typedef struct {
 
     /* General settings */
     char data_path[260];
+
+    /* Launcher settings */
+    car_switch_mode car_switch_behavior;
 } ira_config;
 
 /*

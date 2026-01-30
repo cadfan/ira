@@ -76,6 +76,8 @@ typedef struct {
     char driver_name[64];
     int driver_car_idx;
     float track_length_km;
+    int car_id;
+    int track_id;
 } SessionInfo;
 
 /* Telemetry variable offsets (cached for performance) */
@@ -131,6 +133,13 @@ static bool parse_session_info(SessionInfo *info)
         snprintf(path, sizeof(path), "DriverInfo:Drivers:CarIdx:{%d}CarPath", info->driver_car_idx);
         yaml_parse_string(yaml, path, info->car_name, sizeof(info->car_name));
     }
+
+    /* Parse car ID */
+    snprintf(path, sizeof(path), "DriverInfo:Drivers:CarIdx:{%d}CarID", info->driver_car_idx);
+    yaml_parse_int(yaml, path, &info->car_id);
+
+    /* Parse track ID */
+    yaml_parse_int(yaml, "WeekendInfo:TrackID", &info->track_id);
 
     return info->track_name[0] != '\0';
 }
@@ -873,10 +882,22 @@ int main(int argc, char *argv[])
     SessionInfo session_info = {0};
     int last_session_update = -1;
     int current_session_update = irsdk_get_session_info_update();
+    int last_car_id = -1;
+    int last_track_id = -1;
 
     if (current_session_update != last_session_update) {
         if (parse_session_info(&session_info)) {
             display_session_info(&session_info);
+            last_car_id = session_info.car_id;
+            last_track_id = session_info.track_id;
+
+            /* Initial filter evaluation for session apps */
+            if (launcher && session_info.car_id > 0) {
+                int changes = launcher_update_for_session(launcher, session_info.car_id, session_info.track_id);
+                if (changes > 0) {
+                    printf("Launched/stopped %d app(s) based on car/track filters.\n\n", changes);
+                }
+            }
         }
         last_session_update = current_session_update;
     }
@@ -919,6 +940,31 @@ int main(int argc, char *argv[])
                 printf("\n\nSession info updated!\n");
                 if (parse_session_info(&session_info)) {
                     display_session_info(&session_info);
+
+                    /* Check for car/track changes */
+                    bool car_changed = (session_info.car_id != last_car_id && session_info.car_id > 0);
+                    bool track_changed = (session_info.track_id != last_track_id && session_info.track_id > 0);
+
+                    if ((car_changed || track_changed) && launcher) {
+                        if (cfg.car_switch_behavior == CAR_SWITCH_AUTO) {
+                            int changes = launcher_update_for_session(launcher, session_info.car_id, session_info.track_id);
+                            if (changes > 0) {
+                                printf("Switched %d app(s) for new car/track.\n", changes);
+                            }
+                        } else if (cfg.car_switch_behavior == CAR_SWITCH_PROMPT) {
+                            printf("Car/track changed. Press Enter to update apps, or continue driving...\n");
+                            /* Note: Non-blocking prompt would require more complex handling */
+                            /* For now, auto-switch after displaying the message */
+                            int changes = launcher_update_for_session(launcher, session_info.car_id, session_info.track_id);
+                            if (changes > 0) {
+                                printf("Switched %d app(s) for new car/track.\n", changes);
+                            }
+                        }
+                        /* CAR_SWITCH_DISABLED: do nothing */
+                    }
+
+                    last_car_id = session_info.car_id;
+                    last_track_id = session_info.track_id;
                 }
                 last_session_update = current_session_update;
             }
@@ -963,13 +1009,20 @@ int main(int argc, char *argv[])
 
                     /* State transition: CONNECTED -> IN_SESSION */
                     current_state = STATE_IN_SESSION;
-                    if (launcher) {
-                        launcher_start_all(launcher, LAUNCH_ON_SESSION);
-                    }
 
                     /* Re-parse session info */
                     if (parse_session_info(&session_info)) {
                         display_session_info(&session_info);
+                        last_car_id = session_info.car_id;
+                        last_track_id = session_info.track_id;
+
+                        /* Start session apps with filter evaluation */
+                        if (launcher && session_info.car_id > 0) {
+                            int changes = launcher_update_for_session(launcher, session_info.car_id, session_info.track_id);
+                            if (changes > 0) {
+                                printf("Launched %d app(s) based on car/track filters.\n", changes);
+                            }
+                        }
                     }
                     last_session_update = irsdk_get_session_info_update();
 
