@@ -1,5 +1,14 @@
 # Security Policy
 
+## Supported Versions
+
+Only the latest release is supported with security updates.
+
+| Version | Supported |
+| ------- | --------- |
+| latest  | Yes       |
+| < latest | No       |
+
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability in ira, please report it privately rather than opening a public issue.
