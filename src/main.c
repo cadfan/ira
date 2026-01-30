@@ -39,6 +39,60 @@ static void signal_handler(int sig)
     printf("\nShutting down...\n");
 }
 
+/*
+ * Console input functions using Windows API
+ */
+
+/* Check if console input is available (non-blocking) */
+static bool console_input_available(void)
+{
+    HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
+    if (hInput == INVALID_HANDLE_VALUE) return false;
+
+    /* Wait with 0 timeout - returns immediately */
+    return WaitForSingleObject(hInput, 0) == WAIT_OBJECT_0;
+}
+
+/* Read a single key from console (blocking) */
+static int console_read_key(void)
+{
+    HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
+    if (hInput == INVALID_HANDLE_VALUE) return 0;
+
+    /* Set console mode for reading */
+    DWORD oldMode;
+    GetConsoleMode(hInput, &oldMode);
+    SetConsoleMode(hInput, ENABLE_PROCESSED_INPUT);
+
+    INPUT_RECORD record;
+    DWORD read;
+
+    while (ReadConsoleInput(hInput, &record, 1, &read)) {
+        if (record.EventType == KEY_EVENT &&
+            record.Event.KeyEvent.bKeyDown &&
+            record.Event.KeyEvent.uChar.AsciiChar != 0) {
+            SetConsoleMode(hInput, oldMode);
+            return record.Event.KeyEvent.uChar.AsciiChar;
+        }
+    }
+
+    SetConsoleMode(hInput, oldMode);
+    return 0;
+}
+
+/* Flush any pending input events from console */
+static void console_flush_input(void)
+{
+    HANDLE hInput = GetStdHandle(STD_INPUT_HANDLE);
+    if (hInput != INVALID_HANDLE_VALUE) {
+        FlushConsoleInputBuffer(hInput);
+    }
+    /* Also clear GetAsyncKeyState history */
+    for (int vk = 0x08; vk <= 0x5A; vk++) {
+        GetAsyncKeyState(vk);
+    }
+}
+
 /* Application state for launcher integration */
 typedef enum {
     STATE_WAITING,      /* Waiting for iRacing */
@@ -243,6 +297,7 @@ static void print_usage(const char *program_name)
     printf("  -m, --metric            Use metric units (default)\n");
     printf("  -i, --imperial          Use imperial units\n");
     printf("  --log-dir <path>        Set telemetry log directory\n");
+    printf("  --menu                  Open interactive configuration menu\n");
     printf("\n");
     printf("App Launcher:\n");
     printf("  --launch-apps           Launch all manual-trigger apps and exit\n");
@@ -668,6 +723,387 @@ static void sync_data(ira_database *db)
     printf("\nSync complete.\n");
 }
 
+/*
+ * Interactive Menu Functions
+ */
+
+/* Helper to read a line of input */
+static bool read_line(char *buf, int size)
+{
+    if (!fgets(buf, size, stdin)) return false;
+    /* Remove trailing newline */
+    char *nl = strchr(buf, '\n');
+    if (nl) *nl = '\0';
+    return buf[0] != '\0';
+}
+
+/* Display the main menu */
+static void show_menu(void)
+{
+    printf("\n========================================\n");
+    printf("  ira - Configuration Menu\n");
+    printf("========================================\n");
+    printf("  [1] List apps\n");
+    printf("  [2] Add app\n");
+    printf("  [3] Remove app\n");
+    printf("  [4] Toggle app enabled/disabled\n");
+    printf("  [5] Launch/stop app manually\n");
+    printf("  [6] View settings\n");
+    printf("  [7] Show filter status\n");
+    printf("  [8] Show races\n");
+    printf("  [q] Exit menu\n");
+    printf("----------------------------------------\n");
+    printf("Select option: ");
+    fflush(stdout);
+}
+
+/* Interactive add app */
+static void menu_add_app(app_launcher *launcher)
+{
+    char name[64];
+    char path[MAX_PATH];
+    char trigger_str[32];
+    char close_str[32];
+
+    printf("\n--- Add New App ---\n");
+
+    printf("App name: ");
+    fflush(stdout);
+    if (!read_line(name, sizeof(name))) {
+        printf("Cancelled.\n");
+        return;
+    }
+
+    /* Check if already exists */
+    if (launcher_get_app(launcher, name)) {
+        printf("Error: App '%s' already exists.\n", name);
+        return;
+    }
+
+    printf("Executable path: ");
+    fflush(stdout);
+    if (!read_line(path, sizeof(path))) {
+        printf("Cancelled.\n");
+        return;
+    }
+
+    printf("Trigger (on_connect/on_session/manual) [on_connect]: ");
+    fflush(stdout);
+    if (!read_line(trigger_str, sizeof(trigger_str))) {
+        strcpy(trigger_str, "on_connect");
+    }
+
+    printf("Close behavior (on_iracing_exit/on_ira_exit/never) [on_iracing_exit]: ");
+    fflush(stdout);
+    if (!read_line(close_str, sizeof(close_str))) {
+        strcpy(close_str, "on_iracing_exit");
+    }
+
+    /* Create profile */
+    app_profile profile;
+    memset(&profile, 0, sizeof(profile));
+    strncpy(profile.name, name, sizeof(profile.name) - 1);
+    strncpy(profile.exe_path, path, sizeof(profile.exe_path) - 1);
+    profile.trigger = launcher_string_to_trigger(trigger_str);
+    profile.on_close = launcher_string_to_close(close_str);
+    profile.enabled = true;
+
+    if (!launcher_add_app(launcher, &profile)) {
+        printf("Error: Could not add app.\n");
+        return;
+    }
+
+    if (!launcher_save_config(launcher, config_get_apps_path())) {
+        printf("Error: Could not save configuration.\n");
+        return;
+    }
+
+    printf("Added '%s' successfully.\n", name);
+}
+
+/* Interactive remove app */
+static void menu_remove_app(app_launcher *launcher)
+{
+    int count = launcher_get_app_count(launcher);
+    if (count == 0) {
+        printf("\nNo apps configured.\n");
+        return;
+    }
+
+    printf("\n--- Remove App ---\n");
+    for (int i = 0; i < count; i++) {
+        app_profile *app = launcher_get_app_at(launcher, i);
+        if (app) {
+            printf("  [%d] %s\n", i + 1, app->name);
+        }
+    }
+    printf("  [0] Cancel\n");
+
+    printf("Select app to remove: ");
+    fflush(stdout);
+
+    char input[16];
+    if (!read_line(input, sizeof(input))) {
+        printf("Cancelled.\n");
+        return;
+    }
+
+    int choice = atoi(input);
+    if (choice == 0 || choice > count) {
+        printf("Cancelled.\n");
+        return;
+    }
+
+    app_profile *app = launcher_get_app_at(launcher, choice - 1);
+    if (!app) {
+        printf("Error: Invalid selection.\n");
+        return;
+    }
+
+    char name[64];
+    strncpy(name, app->name, sizeof(name) - 1);
+    name[sizeof(name) - 1] = '\0';
+
+    if (!launcher_remove_app(launcher, name)) {
+        printf("Error: Could not remove app.\n");
+        return;
+    }
+
+    if (!launcher_save_config(launcher, config_get_apps_path())) {
+        printf("Error: Could not save configuration.\n");
+        return;
+    }
+
+    printf("Removed '%s' successfully.\n", name);
+}
+
+/* Interactive toggle app enabled/disabled */
+static void menu_toggle_app(app_launcher *launcher)
+{
+    int count = launcher_get_app_count(launcher);
+    if (count == 0) {
+        printf("\nNo apps configured.\n");
+        return;
+    }
+
+    printf("\n--- Toggle App Enabled/Disabled ---\n");
+    for (int i = 0; i < count; i++) {
+        app_profile *app = launcher_get_app_at(launcher, i);
+        if (app) {
+            printf("  [%d] %s (%s)\n", i + 1, app->name, app->enabled ? "enabled" : "disabled");
+        }
+    }
+    printf("  [0] Cancel\n");
+
+    printf("Select app to toggle: ");
+    fflush(stdout);
+
+    char input[16];
+    if (!read_line(input, sizeof(input))) {
+        printf("Cancelled.\n");
+        return;
+    }
+
+    int choice = atoi(input);
+    if (choice == 0 || choice > count) {
+        printf("Cancelled.\n");
+        return;
+    }
+
+    app_profile *app = launcher_get_app_at(launcher, choice - 1);
+    if (!app) {
+        printf("Error: Invalid selection.\n");
+        return;
+    }
+
+    app->enabled = !app->enabled;
+
+    if (!launcher_save_config(launcher, config_get_apps_path())) {
+        printf("Error: Could not save configuration.\n");
+        return;
+    }
+
+    printf("'%s' is now %s.\n", app->name, app->enabled ? "enabled" : "disabled");
+}
+
+/* Interactive launch/stop app */
+static void menu_launch_stop_app(app_launcher *launcher)
+{
+    int count = launcher_get_app_count(launcher);
+    if (count == 0) {
+        printf("\nNo apps configured.\n");
+        return;
+    }
+
+    launcher_update_status(launcher);
+
+    printf("\n--- Launch/Stop App ---\n");
+    for (int i = 0; i < count; i++) {
+        app_profile *app = launcher_get_app_at(launcher, i);
+        if (app) {
+            printf("  [%d] %s (%s)\n", i + 1, app->name, app->is_running ? "RUNNING" : "stopped");
+        }
+    }
+    printf("  [0] Cancel\n");
+
+    printf("Select app: ");
+    fflush(stdout);
+
+    char input[16];
+    if (!read_line(input, sizeof(input))) {
+        printf("Cancelled.\n");
+        return;
+    }
+
+    int choice = atoi(input);
+    if (choice == 0 || choice > count) {
+        printf("Cancelled.\n");
+        return;
+    }
+
+    app_profile *app = launcher_get_app_at(launcher, choice - 1);
+    if (!app) {
+        printf("Error: Invalid selection.\n");
+        return;
+    }
+
+    if (app->is_running) {
+        printf("Stopping %s...", app->name);
+        fflush(stdout);
+        if (launcher_stop_app(launcher, app->name)) {
+            printf(" OK\n");
+        } else {
+            printf(" FAILED\n");
+        }
+    } else {
+        printf("Starting %s...", app->name);
+        fflush(stdout);
+        if (launcher_start_app(launcher, app->name)) {
+            printf(" OK\n");
+        } else {
+            printf(" FAILED\n");
+        }
+    }
+}
+
+/* Display current settings */
+static void menu_view_settings(const ira_config *cfg)
+{
+    printf("\n--- Current Settings ---\n");
+    printf("Units:                %s\n", cfg->use_metric_units ? "metric" : "imperial");
+    printf("Telemetry logging:    %s\n", cfg->telemetry_logging_enabled ? "enabled" : "disabled");
+    printf("Log path:             %s\n", cfg->telemetry_log_path);
+
+    const char *switch_str;
+    switch (cfg->car_switch_behavior) {
+        case CAR_SWITCH_AUTO:     switch_str = "auto"; break;
+        case CAR_SWITCH_PROMPT:   switch_str = "prompt"; break;
+        case CAR_SWITCH_DISABLED: switch_str = "disabled"; break;
+        default:                  switch_str = "unknown"; break;
+    }
+    printf("Car switch behavior:  %s\n", switch_str);
+
+    printf("\nConfig file: %s\n", config_get_default_path());
+    printf("Apps file:   %s\n", config_get_apps_path());
+    printf("Data dir:    %s\n", config_get_data_path());
+}
+
+/* Wrapper for filter status with lazy database loading */
+static void menu_filter_status(ira_database **db_ptr)
+{
+    if (!*db_ptr) {
+        printf("\nLoading database...\n");
+        *db_ptr = database_create();
+        if (*db_ptr) {
+            database_load_all(*db_ptr);
+        }
+    }
+
+    if (!*db_ptr) {
+        printf("Error: Could not load database.\n");
+        return;
+    }
+
+    printf("\n");
+    show_filter_status(*db_ptr);
+}
+
+/* Wrapper for show races with lazy database loading */
+static void menu_show_races(ira_database **db_ptr)
+{
+    if (!*db_ptr) {
+        printf("\nLoading database...\n");
+        *db_ptr = database_create();
+        if (*db_ptr) {
+            database_load_all(*db_ptr);
+        }
+    }
+
+    if (!*db_ptr) {
+        printf("Error: Could not load database.\n");
+        return;
+    }
+
+    printf("\n");
+    show_races(*db_ptr, false);
+}
+
+/* Main menu handler */
+static void handle_menu(app_launcher *launcher, ira_config *cfg, ira_database **db_ptr)
+{
+    bool in_menu = true;
+
+    /* Flush any pending input before showing menu */
+    console_flush_input();
+
+    while (in_menu && g_running) {
+        show_menu();
+        int choice = console_read_key();
+        printf("%c\n", choice);  /* Echo the character */
+
+        switch (choice) {
+            case '1':
+                printf("\n");
+                list_apps(launcher);
+                break;
+            case '2':
+                menu_add_app(launcher);
+                break;
+            case '3':
+                menu_remove_app(launcher);
+                break;
+            case '4':
+                menu_toggle_app(launcher);
+                break;
+            case '5':
+                menu_launch_stop_app(launcher);
+                break;
+            case '6':
+                menu_view_settings(cfg);
+                break;
+            case '7':
+                menu_filter_status(db_ptr);
+                break;
+            case '8':
+                menu_show_races(db_ptr);
+                break;
+            case 'q':
+            case 'Q':
+                in_menu = false;
+                break;
+            default:
+                printf("Invalid option.\n");
+                break;
+        }
+
+        if (in_menu && g_running) {
+            printf("\nPress any key to continue...");
+            fflush(stdout);
+            console_read_key();
+        }
+    }
+}
+
 int main(int argc, char *argv[])
 {
     print_banner();
@@ -686,6 +1122,7 @@ int main(int argc, char *argv[])
     bool do_show_races_all = false;
     bool do_filter_status = false;
     bool do_sync = false;
+    bool do_menu = false;
     const char *add_app_name = NULL;
     const char *add_app_path = NULL;
     char log_dir[260];
@@ -703,6 +1140,8 @@ int main(int argc, char *argv[])
             cfg.use_metric_units = false;
         } else if (strcmp(argv[i], "--log-dir") == 0 && i + 1 < argc) {
             strncpy(log_dir, argv[++i], sizeof(log_dir) - 1);
+        } else if (strcmp(argv[i], "--menu") == 0) {
+            do_menu = true;
         } else if (strcmp(argv[i], "--launch-apps") == 0) {
             do_launch_apps = true;
         } else if (strcmp(argv[i], "--list-apps") == 0) {
@@ -729,6 +1168,22 @@ int main(int argc, char *argv[])
     app_launcher *launcher = launcher_create();
     if (launcher) {
         launcher_load_config(launcher, config_get_apps_path());
+    }
+
+    /* Handle --menu command */
+    if (do_menu) {
+        if (launcher) {
+            ira_database *menu_db = NULL;
+            g_running = true;  /* Ensure menu loop can run */
+            handle_menu(launcher, &cfg, &menu_db);
+            if (menu_db) {
+                database_destroy(menu_db);
+            }
+            launcher_destroy(launcher);
+        } else {
+            printf("Error: Could not create launcher\n");
+        }
+        return 0;
     }
 
     /* Handle --add-app command */
@@ -800,13 +1255,39 @@ int main(int argc, char *argv[])
     /* Initialize state tracking for launcher */
     ira_state current_state = STATE_WAITING;
 
-    printf("Waiting for iRacing...\n");
+    /* Database pointer for lazy loading in menu */
+    ira_database *menu_db = NULL;
 
-    /* Wait for connection */
-    while (g_running && !irsdk_startup()) {
-        Sleep(1000);
+    printf("Waiting for iRacing... (press any key for menu)\n");
+
+    /* Clear any pending input */
+    console_flush_input();
+
+    /* Wait for connection, with interactive menu support */
+    /* Check both irsdk_startup() AND irsdk_is_connected() to ensure iRacing is actually running */
+    while (g_running) {
+        /* Try to connect and check if actually connected */
+        if (irsdk_startup() && irsdk_is_connected()) {
+            break;  /* iRacing is running and connected */
+        }
+
+        /* Check for keyboard input to open menu */
+        if (console_input_available()) {
+            console_read_key();  /* consume the input */
+            handle_menu(launcher, &cfg, &menu_db);
+            console_flush_input();  /* Clear input after menu */
+            printf("\nWaiting for iRacing... (press any key for menu)\n");
+        }
+
+        Sleep(200);
         printf(".");
         fflush(stdout);
+    }
+
+    /* Clean up lazy-loaded database if used */
+    if (menu_db) {
+        database_destroy(menu_db);
+        menu_db = NULL;
     }
 
     if (!g_running) {
