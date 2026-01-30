@@ -17,6 +17,10 @@
 #include "../data/models.h"
 #include "../data/database.h"
 
+/* Forward declarations */
+typedef struct http_session http_session;
+typedef struct oauth_client oauth_client;
+
 /*
  * API Error Codes
  */
@@ -47,6 +51,12 @@ typedef enum {
  * API Client structure
  */
 typedef struct {
+    /* HTTP Session */
+    http_session *http;
+
+    /* OAuth2 Client (optional - for OAuth auth) */
+    oauth_client *oauth;
+
     /* Authentication */
     auth_state state;
     char *access_token;
@@ -81,8 +91,11 @@ void api_destroy(iracing_api *api);
  * Configuration
  */
 
-/* Set credentials for authentication */
+/* Set credentials for legacy authentication (no longer supported) */
 void api_set_credentials(iracing_api *api, const char *email, const char *password);
+
+/* Configure OAuth2 authentication (required since Dec 2025) */
+void api_set_oauth(iracing_api *api, const char *client_id, const char *client_secret);
 
 /* Set request timeout in milliseconds */
 void api_set_timeout(iracing_api *api, int timeout_ms);

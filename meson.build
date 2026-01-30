@@ -15,7 +15,13 @@ if host_machine.system() == 'windows'
   winmm = meson.get_compiler('c').find_library('winmm')
   shell32 = meson.get_compiler('c').find_library('shell32')
 
-  windows_deps = [kernel32, user32, winmm, shell32]
+  # HTTP and crypto libraries for iRacing API
+  winhttp = meson.get_compiler('c').find_library('winhttp')
+  bcrypt = meson.get_compiler('c').find_library('bcrypt')
+  crypt32 = meson.get_compiler('c').find_library('crypt32')
+  ws2_32 = meson.get_compiler('c').find_library('ws2_32')
+
+  windows_deps = [kernel32, user32, winmm, shell32, winhttp, bcrypt, crypt32, ws2_32]
 else
   error('ira currently only supports Windows')
 endif
@@ -29,6 +35,9 @@ irsdk_sources = files(
 util_sources = files(
   'src/util/json.c',
   'src/util/config.c',
+  'src/util/crypto.c',
+  'src/util/http.c',
+  'src/util/oauth.c',
 )
 
 data_sources = files(

@@ -101,6 +101,105 @@ The executable will be at `build/ira.exe`.
 - Document public APIs in header files
 - Write tests for core functionality
 
+## iRacing API Authentication (OAuth2)
+
+**Status**: OAuth2 implementation complete, awaiting credentials from iRacing.
+
+Legacy authentication (username/password to `/auth` endpoint) was retired by iRacing on December 9, 2025. All API access now requires OAuth2.
+
+### When OAuth Credentials Are Received
+
+Once iRacing provides the `client_id` (and optionally `client_secret`), complete these steps:
+
+#### 1. Create a configuration file `oauth_config.json` in the project root:
+
+```json
+{
+  "client_id": "YOUR_CLIENT_ID_HERE",
+  "client_secret": "YOUR_CLIENT_SECRET_OR_NULL",
+  "redirect_uri": "http://localhost:8080/callback",
+  "callback_port": 8080
+}
+```
+
+#### 2. Update `src/main.c` to use OAuth authentication:
+
+Replace any legacy `api_set_credentials()` calls with:
+
+```c
+#include "api/iracing_api.h"
+
+// In your initialization code:
+iracing_api *api = api_create();
+api_set_oauth(api, "YOUR_CLIENT_ID", NULL);  // NULL if no client_secret
+
+api_error err = api_authenticate(api);
+if (err != API_OK) {
+    printf("Auth failed: %s\n", api_get_last_error(api));
+    return 1;
+}
+
+// Now fetch data:
+ira_database *db = database_create();
+api_fetch_cars(api, db);
+api_fetch_tracks(api, db);
+api_fetch_seasons(api, db, 2026, 1);
+
+// Save to JSON files:
+database_save_cars(db, database_get_cars_path());
+database_save_tracks(db, database_get_tracks_path());
+database_save_seasons(db, database_get_seasons_path());
+```
+
+#### 3. Test the OAuth flow:
+
+```bash
+meson compile -C build
+./build/ira.exe
+```
+
+The first run will:
+1. Open your browser to iRacing's login page
+2. Wait for authorization on `localhost:8080`
+3. Exchange the code for tokens
+4. Save tokens to `oauth_tokens.json` (auto-refreshed on future runs)
+
+### OAuth Module Reference
+
+| Function | Purpose |
+|----------|---------|
+| `api_set_oauth(api, client_id, client_secret)` | Configure OAuth credentials |
+| `api_authenticate(api)` | Start OAuth flow (opens browser) |
+| `oauth_token_valid(client)` | Check if token is still valid |
+| `oauth_refresh(client)` | Refresh expired token |
+| `oauth_save_tokens(client, filename)` | Persist tokens to file |
+| `oauth_load_tokens(client, filename)` | Load tokens from file |
+
+### Files Involved
+
+- `src/util/oauth.h` / `oauth.c` - OAuth2 client with PKCE
+- `src/util/crypto.h` / `crypto.c` - SHA256 and Base64 for PKCE
+- `src/util/http.h` / `http.c` - HTTP client with Bearer token support
+- `src/api/iracing_api.h` / `iracing_api.c` - API client with OAuth integration
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "No client_id" error | Call `api_set_oauth()` before `api_authenticate()` |
+| Browser doesn't open | Manually visit the URL printed to console |
+| Port 8080 in use | Change `callback_port` in oauth_config or code |
+| Token expired | Tokens auto-refresh; delete `oauth_tokens.json` to re-auth |
+| 401 on API calls | Token invalid; delete `oauth_tokens.json` and re-authenticate |
+
+### iRacing OAuth Registration
+
+To obtain credentials, register at: https://oauth.iracing.com/oauth2/book/client_registration.html
+
+Request type: **Password Limited** (for CLI/backend apps) or **Authorization Code** (for user-facing apps)
+
+Processing time: Up to 10 business days
+
 ## License
 
 **Source Available License** - Copyright (c) 2026 Christopher Griffiths
