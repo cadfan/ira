@@ -1,0 +1,239 @@
+{
+  "series": [
+    {
+      "name": "GT Endurance Series by Simucube",
+      "type": "special_event",
+      "licence": "C",
+      "category": "sports_car",
+      "setup": "open",
+      "session": {
+        "practice_minutes": 3,
+        "qualifying_minutes": 8,
+        "race_minutes": 180
+      },
+      "track": {
+        "name": "Shell V-Power Motorsport Park at The Bend",
+        "config": "International Circuit"
+      },
+      "cars": [
+        "BMW M4 GT3 EVO",
+        "Lamborghini Huracán GT3 EVO",
+        "Mercedes-AMG GT3 2020",
+        "Porsche 911 GT3 R (992)",
+        "Ferrari 296 GT3",
+        "Audi R8 LMS EVO II GT3",
+        "Chevrolet Corvette Z06 GT3.R",
+        "Ford Mustang GT3",
+        "McLaren 720S GT3 EVO",
+        "Acura NSX GT3 EVO 22",
+        "Aston Martin Vantage GT3 EVO"
+      ],
+      "race_times": [
+        "2026-01-31T09:00:00Z",
+        "2026-01-31T19:00:00Z",
+        "2026-02-01T17:00:00Z"
+      ]
+    },
+    {
+      "name": "IMSA Sportscar Endurance Challenge",
+      "type": "special_event",
+      "licence": "D",
+      "category": "sports_car",
+      "setup": "open",
+      "multiclass": true,
+      "session": {
+        "practice_minutes": 3,
+        "qualifying_minutes": 8,
+        "race_minutes": 120
+      },
+      "track": {
+        "name": "Miami International Autodrome",
+        "config": "Grand Prix"
+      },
+      "car_classes": {
+        "GT4": [
+          "Porsche 718 Cayman GT4 Clubsport MR",
+          "McLaren 570S GT4",
+          "Aston Martin Vantage GT4",
+          "Mercedes-AMG GT4",
+          "BMW M4 G82 GT4 Evo",
+          "Ford Mustang GT4"
+        ],
+        "LMP3": [
+          "Ligier JS P320"
+        ]
+      },
+      "race_times": [
+        "2026-01-31T04:00:00Z",
+        "2026-01-31T15:00:00Z",
+        "2026-02-01T00:00:00Z",
+        "2026-02-01T20:00:00Z"
+      ]
+    },
+    {
+      "name": "Sports Car Challenge by Falken Tyre",
+      "type": "regular",
+      "licence": "D",
+      "category": "sports_car",
+      "setup": "open",
+      "multiclass": true,
+      "session": {
+        "practice_minutes": 3,
+        "qualifying_minutes": 8,
+        "race_minutes": 30
+      },
+      "track": {
+        "name": "Miami International Autodrome",
+        "config": "Grand Prix"
+      },
+      "car_classes": {
+        "GT4": [
+          "Porsche 718 Cayman GT4 Clubsport MR",
+          "McLaren 570S GT4",
+          "Aston Martin Vantage GT4",
+          "Mercedes-AMG GT4",
+          "BMW M4 G82 GT4 Evo",
+          "Ford Mustang GT4"
+        ],
+        "LMP3": [
+          "Ligier JS P320"
+        ]
+      },
+      "frequency": {
+        "interval_hours": 2,
+        "start_minute": 30,
+        "odd_hours": true
+      }
+    },
+    {
+      "name": "LMP3 Trophy",
+      "type": "regular",
+      "licence": "C",
+      "category": "sports_car",
+      "setup": "open",
+      "session": {
+        "practice_minutes": 3,
+        "qualifying_minutes": 8,
+        "race_minutes": 20
+      },
+      "track": {
+        "name": "Miami International Autodrome",
+        "config": "Grand Prix"
+      },
+      "cars": [
+        "Ligier JS P320"
+      ],
+      "frequency": {
+        "interval_hours": 2,
+        "start_minute": 30,
+        "odd_hours": false
+      }
+    },
+    {
+      "name": "GT4 Challenge by Falken Tyre",
+      "type": "regular",
+      "licence": "D",
+      "category": "sports_car",
+      "setup": "open",
+      "session": {
+        "practice_minutes": 3,
+        "qualifying_minutes": 8,
+        "race_minutes": 20
+      },
+      "track": {
+        "name": "Miami International Autodrome",
+        "config": "Grand Prix"
+      },
+      "cars": [
+        "Porsche 718 Cayman GT4 Clubsport MR",
+        "McLaren 570S GT4",
+        "Aston Martin Vantage GT4",
+        "Mercedes-AMG GT4",
+        "BMW M4 G82 GT4 Evo",
+        "Ford Mustang GT4"
+      ],
+      "frequency": {
+        "interval_hours": 2,
+        "start_minute": 30,
+        "odd_hours": false
+      }
+    },
+    {
+      "name": "Ring Meister",
+      "type": "regular",
+      "licence": "D",
+      "category": "sports_car",
+      "setup": "fixed",
+      "session": {
+        "warmup_minutes": 6,
+        "grid_minutes": 1,
+        "race_laps": 3,
+        "lap_time_estimate": 7.25
+      },
+      "track": {
+        "name": "Nürburgring Nordschleife",
+        "config": "Industriefahrten"
+      },
+      "cars": [
+        "Cadillac CTS-V Racecar"
+      ],
+      "frequency": {
+        "interval_hours": 1,
+        "start_minute": 0
+      }
+    },
+    {
+      "name": "Production Car Challenge by Sim-Lab",
+      "type": "regular",
+      "licence": "D",
+      "category": "sports_car",
+      "setup": "open",
+      "session": {
+        "practice_minutes": 3,
+        "qualifying_minutes": 8,
+        "race_minutes": 25
+      },
+      "track": {
+        "name": "Sonoma Raceway",
+        "config": "Sportscar Alt"
+      },
+      "cars": [
+        "Global Mazda MX-5 Cup",
+        "Toyota GR86",
+        "Renault Clio",
+        "BMW M2 CS Racing"
+      ],
+      "frequency": {
+        "interval_hours": 1,
+        "start_minute": 30
+      }
+    },
+    {
+      "name": "Production Endurance Challenge",
+      "type": "special_event",
+      "licence": "D",
+      "category": "sports_car",
+      "setup": "open",
+      "session": {
+        "practice_minutes": 3,
+        "qualifying_minutes": 8,
+        "race_minutes": 120
+      },
+      "track": {
+        "name": "Sonoma Raceway",
+        "config": "Sportscar Alt"
+      },
+      "cars": [
+        "Global Mazda MX-5 Cup",
+        "Toyota GR86",
+        "Renault Clio",
+        "BMW M2 CS Racing"
+      ],
+      "race_times": [
+        "2026-01-30T19:00:00Z",
+        "2026-01-31T07:00:00Z",
+        "2026-02-01T18:00:00Z"
+      ]
+    }
+  ]
+}
