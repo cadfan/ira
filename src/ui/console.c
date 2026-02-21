@@ -19,6 +19,7 @@
 #include "ui.h"
 #include "../filter/race_filter.h"
 #include "../controller/app_controller.h"
+#include "../controller/filter_controller.h"
 
 #include "version.h"
 
@@ -383,22 +384,14 @@ static void console_show_races(ui_backend *ui, ira_database *db, bool show_all)
         return;
     }
 
-    /* Create filter results */
-    filter_results *results = filter_results_create();
-    if (!results) {
-        printf("Error: Could not create filter results\n");
+    /* Get filtered and sorted results via controller */
+    filter_results *results = NULL;
+    const char *error = NULL;
+    if (!filter_controller_get_races(db, show_all, SORT_BY_CATEGORY, true,
+                                     &results, &error)) {
+        ui->show_error(ui, error);
         return;
     }
-
-    /* Apply filter (show_all bypasses all filter criteria) */
-    if (show_all) {
-        filter_apply_show_all(db, results);
-    } else {
-        filter_apply(db, results);
-    }
-
-    /* Sort by series name */
-    filter_results_sort(results, SORT_BY_CATEGORY, true);
 
     /* Display results */
     set_color(ui, COL_CYAN);
@@ -852,13 +845,30 @@ static void menu_launch_stop_app_interactive(ui_backend *ui, app_launcher *launc
     }
 
     bool was_running = false;
+    const char *error = NULL;
     const char *action = app->is_running ? "Stopping" : "Starting";
     snprintf(msg, sizeof(msg), "%s %s", action, app->name);
-    bool ok = app_controller_launch_stop(launcher, choice - 1, &was_running);
-    ui->show_sync_progress(ui, msg, ok, NULL);
+    bool ok = app_controller_launch_stop(launcher, choice - 1, &was_running, &error);
+    ui->show_sync_progress(ui, msg, ok, error);
 }
 
 /* --- Interactive menu --- */
+
+static bool ensure_db_loaded(ui_backend *ui, ira_database **db_ptr)
+{
+    if (*db_ptr) return true;
+
+    ui->show_status(ui, "\nLoading database...");
+    *db_ptr = database_create();
+    if (*db_ptr) {
+        database_load_all(*db_ptr);
+    }
+    if (!*db_ptr) {
+        ui->show_error(ui, "Could not load database.");
+        return false;
+    }
+    return true;
+}
 
 static void console_run_menu(ui_backend *ui, app_launcher *launcher,
                               ira_config *cfg, ira_database **db_ptr)
@@ -896,31 +906,13 @@ static void console_run_menu(ui_backend *ui, app_launcher *launcher,
                 ui->show_settings(ui, cfg);
                 break;
             case '7':
-                if (!*db_ptr) {
-                    ui->show_status(ui, "\nLoading database...");
-                    *db_ptr = database_create();
-                    if (*db_ptr) {
-                        database_load_all(*db_ptr);
-                    }
-                }
-                if (!*db_ptr) {
-                    ui->show_error(ui, "Could not load database.");
-                } else {
+                if (ensure_db_loaded(ui, db_ptr)) {
                     ui->show_status(ui, "");
                     ui->show_filter_status(ui, *db_ptr);
                 }
                 break;
             case '8':
-                if (!*db_ptr) {
-                    ui->show_status(ui, "\nLoading database...");
-                    *db_ptr = database_create();
-                    if (*db_ptr) {
-                        database_load_all(*db_ptr);
-                    }
-                }
-                if (!*db_ptr) {
-                    ui->show_error(ui, "Could not load database.");
-                } else {
+                if (ensure_db_loaded(ui, db_ptr)) {
                     ui->show_status(ui, "");
                     ui->show_races(ui, *db_ptr, false);
                 }
@@ -946,27 +938,24 @@ static void console_run_menu(ui_backend *ui, app_launcher *launcher,
 static void console_launch_apps(ui_backend *ui, app_launcher *launcher)
 {
     char msg[128];
-    int count = launcher_get_app_count(launcher);
-    int launched = 0;
+    launch_result results[32];
+    int attempted = app_controller_launch_manual(launcher, results, 32);
 
-    for (int i = 0; i < count; i++) {
-        app_profile *app = launcher_get_app_at(launcher, i);
-        if (!app || !app->enabled || app->trigger != LAUNCH_MANUAL) {
-            continue;
-        }
-
-        snprintf(msg, sizeof(msg), "Launching %s", app->name);
-        bool ok = launcher_start_app(launcher, app->name);
-        ui->show_sync_progress(ui, msg, ok, NULL);
-        if (ok) launched++;
-    }
-
-    if (launched == 0) {
+    if (attempted == 0) {
         ui->show_status(ui, "No manual-trigger apps to launch.");
-    } else {
-        snprintf(msg, sizeof(msg), "\nLaunched %d app(s).", launched);
-        ui->show_status(ui, msg);
+        return;
     }
+
+    int launched = 0;
+    int display_count = attempted < 32 ? attempted : 32;
+    for (int i = 0; i < display_count; i++) {
+        snprintf(msg, sizeof(msg), "Launching %s", results[i].name);
+        ui->show_sync_progress(ui, msg, results[i].success, NULL);
+        if (results[i].success) launched++;
+    }
+
+    snprintf(msg, sizeof(msg), "\nLaunched %d app(s).", launched);
+    ui->show_status(ui, msg);
 }
 
 static bool console_add_app(ui_backend *ui, app_launcher *launcher,

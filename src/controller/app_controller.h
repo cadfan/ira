@@ -41,15 +41,27 @@ bool app_controller_toggle_enabled(app_launcher *launcher, int index,
 
 /*
  * Launch or stop an app by index (based on current running state).
- * Returns true if the operation succeeded.
+ * Returns true if the operation succeeded. Sets error_out on failure.
+ * was_running_out (if non-NULL) indicates the app's state before the action.
  */
 bool app_controller_launch_stop(app_launcher *launcher, int index,
-                                bool *was_running_out);
+                                bool *was_running_out, const char **error_out);
+
+/*
+ * Per-app launch result for batch operations.
+ */
+typedef struct {
+    const char *name;   /* App name (points into launcher, do not free) */
+    bool success;       /* Whether the launch succeeded */
+} launch_result;
 
 /*
  * Launch all enabled manual-trigger apps.
- * Returns the number of apps successfully launched.
+ * If results is non-NULL, populates up to max_results entries with
+ * per-app name and success/failure. Returns the number of apps attempted.
+ * Pass NULL/0 to get just the count without per-app detail.
  */
-int app_controller_launch_manual(app_launcher *launcher);
+int app_controller_launch_manual(app_launcher *launcher,
+                                 launch_result *results, int max_results);
 
 #endif /* IRA_APP_CONTROLLER_H */

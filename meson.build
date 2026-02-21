@@ -59,6 +59,7 @@ launcher_sources = files(
 
 controller_sources = files(
   'src/controller/app_controller.c',
+  'src/controller/filter_controller.c',
 )
 
 telemetry_sources = files(

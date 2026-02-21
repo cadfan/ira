@@ -91,39 +91,56 @@ bool app_controller_toggle_enabled(app_launcher *launcher, int index,
 }
 
 bool app_controller_launch_stop(app_launcher *launcher, int index,
-                                bool *was_running_out)
+                                bool *was_running_out, const char **error_out)
 {
-    if (!launcher) return false;
+    if (!launcher) {
+        if (error_out) *error_out = "Invalid arguments.";
+        return false;
+    }
 
     app_profile *app = launcher_get_app_at(launcher, index);
-    if (!app) return false;
+    if (!app) {
+        if (error_out) *error_out = "Invalid selection.";
+        return false;
+    }
 
     bool was_running = app->is_running;
     if (was_running_out) *was_running_out = was_running;
 
-    if (was_running) {
-        return launcher_stop_app(launcher, app->name);
-    } else {
-        return launcher_start_app(launcher, app->name);
+    bool ok = was_running
+        ? launcher_stop_app(launcher, app->name)
+        : launcher_start_app(launcher, app->name);
+
+    if (!ok) {
+        if (error_out) *error_out = was_running
+            ? "Could not stop app."
+            : "Could not start app.";
     }
+    return ok;
 }
 
-int app_controller_launch_manual(app_launcher *launcher)
+int app_controller_launch_manual(app_launcher *launcher,
+                                 launch_result *results, int max_results)
 {
     if (!launcher) return 0;
 
     int count = launcher_get_app_count(launcher);
-    int launched = 0;
+    int attempted = 0;
 
     for (int i = 0; i < count; i++) {
         app_profile *app = launcher_get_app_at(launcher, i);
         if (!app || !app->enabled || app->trigger != LAUNCH_MANUAL) {
             continue;
         }
-        if (launcher_start_app(launcher, app->name)) {
-            launched++;
+
+        bool ok = launcher_start_app(launcher, app->name);
+
+        if (results && attempted < max_results) {
+            results[attempted].name = app->name;
+            results[attempted].success = ok;
         }
+        attempted++;
     }
 
-    return launched;
+    return attempted;
 }
