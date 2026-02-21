@@ -132,6 +132,9 @@ bool database_tracks_stale(ira_database *db, int max_age_hours);
 /* Check if cars data needs refresh */
 bool database_cars_stale(ira_database *db, int max_age_hours);
 
+/* Check if car classes data needs refresh */
+bool database_car_classes_stale(ira_database *db, int max_age_hours);
+
 /* Check if seasons data needs refresh */
 bool database_seasons_stale(ira_database *db, int max_age_hours);
 

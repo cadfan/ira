@@ -594,7 +594,7 @@ api_error api_fetch_car_classes(iracing_api *api, ira_database *db)
         json_value *cars = json_object_get(cc, "cars_in_class");
         if (cars && json_get_type(cars) == JSON_ARRAY) {
             int car_count = json_array_length(cars);
-            if (car_count > 32) car_count = 32;
+            if (car_count > MAX_CARS_PER_CLASS) car_count = MAX_CARS_PER_CLASS;
             car_class->car_count = car_count;
             for (int j = 0; j < car_count; j++) {
                 json_value *car_entry = json_array_get(cars, j);

@@ -339,7 +339,7 @@ static bool exchange_code_for_tokens(oauth_client *client, const char *code)
                          "&client_secret=%s", encoded_secret);
                 free(encoded_secret);
             }
-            memset(masked, 0, strlen(masked));
+            SecureZeroMemory(masked, strlen(masked));
             free(masked);
         }
     }
@@ -392,11 +392,11 @@ static bool exchange_code_for_tokens(oauth_client *client, const char *code)
 
     /* Clear old tokens before replacing */
     if (client->tokens.access_token) {
-        memset(client->tokens.access_token, 0, strlen(client->tokens.access_token));
+        SecureZeroMemory(client->tokens.access_token, strlen(client->tokens.access_token));
         free(client->tokens.access_token);
     }
     if (client->tokens.refresh_token) {
-        memset(client->tokens.refresh_token, 0, strlen(client->tokens.refresh_token));
+        SecureZeroMemory(client->tokens.refresh_token, strlen(client->tokens.refresh_token));
         free(client->tokens.refresh_token);
     }
     free(client->tokens.token_type);
@@ -457,7 +457,7 @@ void oauth_destroy(oauth_client *client)
     /* Free config (clear secrets first) */
     free(client->config.client_id);
     if (client->config.client_secret) {
-        memset(client->config.client_secret, 0, strlen(client->config.client_secret));
+        SecureZeroMemory(client->config.client_secret, strlen(client->config.client_secret));
         free(client->config.client_secret);
     }
     free(client->config.redirect_uri);
@@ -466,11 +466,11 @@ void oauth_destroy(oauth_client *client)
 
     /* Free tokens (clear sensitive data first) */
     if (client->tokens.access_token) {
-        memset(client->tokens.access_token, 0, strlen(client->tokens.access_token));
+        SecureZeroMemory(client->tokens.access_token, strlen(client->tokens.access_token));
         free(client->tokens.access_token);
     }
     if (client->tokens.refresh_token) {
-        memset(client->tokens.refresh_token, 0, strlen(client->tokens.refresh_token));
+        SecureZeroMemory(client->tokens.refresh_token, strlen(client->tokens.refresh_token));
         free(client->tokens.refresh_token);
     }
     free(client->tokens.token_type);
@@ -478,7 +478,7 @@ void oauth_destroy(oauth_client *client)
 
     /* Free PKCE state */
     if (client->code_verifier) {
-        memset(client->code_verifier, 0, strlen(client->code_verifier));
+        SecureZeroMemory(client->code_verifier, strlen(client->code_verifier));
         free(client->code_verifier);
     }
     free(client->code_challenge);
@@ -606,11 +606,11 @@ bool oauth_authorize(oauth_client *client)
     bool success = exchange_code_for_tokens(client, auth_code);
 
     /* Clear auth code */
-    memset(auth_code, 0, strlen(auth_code));
+    SecureZeroMemory(auth_code, strlen(auth_code));
     free(auth_code);
 
     /* Clear PKCE state */
-    memset(client->code_verifier, 0, strlen(client->code_verifier));
+    SecureZeroMemory(client->code_verifier, strlen(client->code_verifier));
     free(client->code_verifier);
     client->code_verifier = NULL;
     free(client->code_challenge);
@@ -649,7 +649,7 @@ bool oauth_refresh(oauth_client *client)
                          "&client_secret=%s", encoded_secret);
                 free(encoded_secret);
             }
-            memset(masked, 0, strlen(masked));
+            SecureZeroMemory(masked, strlen(masked));
             free(masked);
         }
     }
@@ -657,7 +657,7 @@ bool oauth_refresh(oauth_client *client)
     http_response *resp = http_post_form(client->http, OAUTH_TOKEN_URL, body);
 
     /* Clear body (contains refresh token) */
-    memset(body, 0, sizeof(body));
+    SecureZeroMemory(body, sizeof(body));
 
     if (!resp) {
         set_error(client, "Refresh request failed");
@@ -696,11 +696,11 @@ bool oauth_refresh(oauth_client *client)
 
     /* Clear old tokens */
     if (client->tokens.access_token) {
-        memset(client->tokens.access_token, 0, strlen(client->tokens.access_token));
+        SecureZeroMemory(client->tokens.access_token, strlen(client->tokens.access_token));
         free(client->tokens.access_token);
     }
     if (client->tokens.refresh_token) {
-        memset(client->tokens.refresh_token, 0, strlen(client->tokens.refresh_token));
+        SecureZeroMemory(client->tokens.refresh_token, strlen(client->tokens.refresh_token));
         free(client->tokens.refresh_token);
     }
 
@@ -769,11 +769,11 @@ bool oauth_load_tokens(oauth_client *client, const char *filename)
 
     /* Clear old tokens before replacing */
     if (client->tokens.access_token) {
-        memset(client->tokens.access_token, 0, strlen(client->tokens.access_token));
+        SecureZeroMemory(client->tokens.access_token, strlen(client->tokens.access_token));
         free(client->tokens.access_token);
     }
     if (client->tokens.refresh_token) {
-        memset(client->tokens.refresh_token, 0, strlen(client->tokens.refresh_token));
+        SecureZeroMemory(client->tokens.refresh_token, strlen(client->tokens.refresh_token));
         free(client->tokens.refresh_token);
     }
     free(client->tokens.token_type);

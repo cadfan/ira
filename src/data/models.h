@@ -93,11 +93,13 @@ typedef struct {
 /*
  * Car Class (group of cars)
  */
+#define MAX_CARS_PER_CLASS 32
+
 typedef struct {
     int car_class_id;
     char car_class_name[64];
     char short_name[32];
-    int car_ids[32];
+    int car_ids[MAX_CARS_PER_CLASS];
     int car_count;
 } ira_car_class;
 

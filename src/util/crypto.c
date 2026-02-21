@@ -139,7 +139,7 @@ char *crypto_iracing_password_hash(const char *password, const char *email)
     unsigned char *hash = crypto_sha256(concat, pass_len + id_len);
 
     /* Clear and free the concatenation (contains password) */
-    memset(concat, 0, pass_len + id_len);
+    SecureZeroMemory(concat, pass_len + id_len);
     free(concat);
 
     if (!hash) return NULL;
@@ -148,7 +148,7 @@ char *crypto_iracing_password_hash(const char *password, const char *email)
     char *encoded = crypto_base64_encode(hash, SHA256_HASH_SIZE);
 
     /* Clear and free the hash */
-    memset(hash, 0, SHA256_HASH_SIZE);
+    SecureZeroMemory(hash, SHA256_HASH_SIZE);
     free(hash);
 
     return encoded;

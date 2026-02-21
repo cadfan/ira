@@ -697,6 +697,15 @@ bool database_cars_stale(ira_database *db, int max_age_hours)
     return hours > max_age_hours;
 }
 
+bool database_car_classes_stale(ira_database *db, int max_age_hours)
+{
+    if (!db || db->car_classes_updated == 0) return true;
+
+    time_t now = time(NULL);
+    double hours = difftime(now, db->car_classes_updated) / 3600.0;
+    return hours > max_age_hours;
+}
+
 bool database_seasons_stale(ira_database *db, int max_age_hours)
 {
     if (!db || db->seasons_updated == 0) return true;
@@ -757,7 +766,7 @@ bool database_load_car_classes(ira_database *db, const char *filename)
         json_value *cars = json_object_get(c, "car_ids");
         if (cars && json_get_type(cars) == JSON_ARRAY) {
             int car_count = json_array_length(cars);
-            if (car_count > 32) car_count = 32;
+            if (car_count > MAX_CARS_PER_CLASS) car_count = MAX_CARS_PER_CLASS;
             cc->car_count = car_count;
             for (int j = 0; j < car_count; j++) {
                 cc->car_ids[j] = json_get_int(json_array_get(cars, j));
