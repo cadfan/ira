@@ -499,6 +499,7 @@ bool database_load_all(ira_database *db)
     /* Load each file - failures are not fatal, just means no cached data */
     database_load_tracks(db, g_tracks_path);
     database_load_cars(db, g_cars_path);
+    database_load_car_classes(db, g_car_classes_path);
     database_load_series(db, g_series_path);
     database_load_seasons(db, g_seasons_path);
     database_load_owned(db, g_owned_path);
@@ -556,10 +557,24 @@ bool database_save_all(ira_database *db)
 
     init_paths();
 
-    /* Save filter settings */
+    bool ok = true;
+
+    if (db->car_count > 0)
+        ok &= database_save_cars(db, g_cars_path);
+    if (db->track_count > 0)
+        ok &= database_save_tracks(db, g_tracks_path);
+    if (db->car_class_count > 0)
+        ok &= database_save_car_classes(db, g_car_classes_path);
+    if (db->series_count > 0)
+        ok &= database_save_series(db, g_series_path);
+    if (db->season_count > 0)
+        ok &= database_save_seasons(db, g_seasons_path);
+    if (db->owned.cust_id > 0)
+        ok &= database_save_owned(db, g_owned_path);
+
     database_save_filter(db, g_filter_path);
 
-    return true;
+    return ok;
 }
 
 /*
@@ -691,8 +706,68 @@ bool database_seasons_stale(ira_database *db, int max_age_hours)
     return hours > max_age_hours;
 }
 
-/* Stub for car classes - not yet needed */
-bool database_load_car_classes(ira_database *db, const char *filename) { (void)db; (void)filename; return false; }
+/*
+ * Load car classes from JSON
+ */
+bool database_load_car_classes(ira_database *db, const char *filename)
+{
+    if (!db || !filename) return false;
+
+    json_value *root = json_parse_file(filename);
+    if (!root) return false;
+
+    json_value *updated = json_object_get(root, "last_updated");
+    if (updated && json_get_type(updated) == JSON_STRING) {
+        db->car_classes_updated = parse_timestamp(json_get_string(updated));
+    }
+
+    json_value *classes_arr = json_object_get(root, "car_classes");
+    if (!classes_arr || json_get_type(classes_arr) != JSON_ARRAY) {
+        json_free(root);
+        return false;
+    }
+
+    int count = json_array_length(classes_arr);
+    if (count == 0) {
+        json_free(root);
+        return true;
+    }
+
+    db->car_classes = calloc(count, sizeof(ira_car_class));
+    if (!db->car_classes) {
+        json_free(root);
+        return false;
+    }
+    db->car_class_count = count;
+
+    for (int i = 0; i < count; i++) {
+        json_value *c = json_array_get(classes_arr, i);
+        if (!c) continue;
+
+        ira_car_class *cc = &db->car_classes[i];
+
+        cc->car_class_id = json_get_int(json_object_get(c, "car_class_id"));
+
+        const char *name = json_get_string(json_object_get(c, "car_class_name"));
+        if (name) safe_strcpy(cc->car_class_name, sizeof(cc->car_class_name), name);
+
+        const char *short_name = json_get_string(json_object_get(c, "short_name"));
+        if (short_name) safe_strcpy(cc->short_name, sizeof(cc->short_name), short_name);
+
+        json_value *cars = json_object_get(c, "car_ids");
+        if (cars && json_get_type(cars) == JSON_ARRAY) {
+            int car_count = json_array_length(cars);
+            if (car_count > 32) car_count = 32;
+            cc->car_count = car_count;
+            for (int j = 0; j < car_count; j++) {
+                cc->car_ids[j] = json_get_int(json_array_get(cars, j));
+            }
+        }
+    }
+
+    json_free(root);
+    return true;
+}
 
 /*
  * Load series from JSON
@@ -837,9 +912,12 @@ bool database_load_seasons(ira_database *db, const char *filename)
 
                         week->race_time_limit_mins = json_get_int(json_object_get(w, "race_time_limit_mins"));
                         week->race_lap_limit = json_get_int(json_object_get(w, "race_lap_limit"));
-                        week->practice_mins = json_get_int(json_object_get(w, "practice_mins"));
-                        week->qualify_mins = json_get_int(json_object_get(w, "qualify_mins"));
-                        week->warmup_mins = json_get_int(json_object_get(w, "warmup_mins"));
+                        week->session_mins = json_get_int(json_object_get(w, "session_mins"));
+                        week->repeat_mins = json_get_int(json_object_get(w, "repeat_mins"));
+                        week->super_session = json_get_bool(json_object_get(w, "super_session"));
+
+                        const char *sd = json_get_string(json_object_get(w, "start_date"));
+                        if (sd) week->start_date = parse_timestamp(sd);
 
                         /* Parse car_ids array */
                         json_value *cars = json_object_get(w, "car_ids");
@@ -1138,9 +1216,15 @@ bool database_save_seasons(ira_database *db, const char *filename)
             json_object_set(w, "config_name", json_new_string(week->config_name));
             json_object_set(w, "race_time_limit_mins", json_new_number(week->race_time_limit_mins));
             json_object_set(w, "race_lap_limit", json_new_number(week->race_lap_limit));
-            json_object_set(w, "practice_mins", json_new_number(week->practice_mins));
-            json_object_set(w, "qualify_mins", json_new_number(week->qualify_mins));
-            json_object_set(w, "warmup_mins", json_new_number(week->warmup_mins));
+            json_object_set(w, "session_mins", json_new_number(week->session_mins));
+            json_object_set(w, "repeat_mins", json_new_number(week->repeat_mins));
+            json_object_set(w, "super_session", json_new_bool(week->super_session));
+
+            if (week->start_date > 0) {
+                char ts[32];
+                format_timestamp(week->start_date, ts, sizeof(ts));
+                json_object_set(w, "start_date", json_new_string(ts));
+            }
 
             json_value *cars = json_new_array();
             for (int k = 0; k < week->car_count; k++) {

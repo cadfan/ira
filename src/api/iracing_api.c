@@ -254,14 +254,36 @@ void api_set_oauth(iracing_api *api, const char *client_id, const char *client_s
     oauth_config config = {0};
     config.client_id = (char*)client_id;
     config.client_secret = (char*)client_secret;
-    config.redirect_uri = "http://localhost:8080/callback";
+    config.redirect_uri = "http://127.0.0.1:8080/callback";
     config.callback_port = 8080;
     config.scope = "iracing.auth";
+    config.audience = "data-server";
 
     api->oauth = oauth_create(&config);
 
     /* Reset auth state */
     api->state = AUTH_STATE_NONE;
+}
+
+bool api_load_oauth_config(iracing_api *api, const char *filename)
+{
+    if (!api || !filename) return false;
+
+    json_value *root = json_parse_file(filename);
+    if (!root) return false;
+
+    const char *client_id = json_get_string(json_object_get(root, "client_id"));
+    if (!client_id) {
+        json_free(root);
+        return false;
+    }
+
+    const char *client_secret = json_get_string(json_object_get(root, "client_secret"));
+
+    api_set_oauth(api, client_id, client_secret);
+
+    json_free(root);
+    return (api->oauth != NULL);
 }
 
 void api_set_timeout(iracing_api *api, int timeout_ms)
@@ -304,17 +326,23 @@ api_error api_authenticate(iracing_api *api)
         /* Try to load existing tokens first */
         if (oauth_load_tokens(api->oauth, "oauth_tokens.json")) {
             if (oauth_token_valid(api->oauth)) {
-                api->state = AUTH_STATE_AUTHENTICATED;
-                api->token_expires = time(NULL) + 3600;  /* Estimate */
-                return API_OK;
-            } else if (oauth_token_expiring(api->oauth, 0)) {
-                /* Try to refresh */
-                if (oauth_refresh(api->oauth)) {
-                    oauth_save_tokens(api->oauth, "oauth_tokens.json");
-                    api->state = AUTH_STATE_AUTHENTICATED;
-                    api->token_expires = time(NULL) + 3600;
-                    return API_OK;
+                /* Token still valid - try refresh if expiring soon */
+                if (oauth_token_expiring(api->oauth, 300)) {
+                    if (oauth_refresh(api->oauth)) {
+                        oauth_save_tokens(api->oauth, "oauth_tokens.json");
+                    }
+                    /* If refresh fails, continue with the still-valid token */
                 }
+                api->state = AUTH_STATE_AUTHENTICATED;
+                api->token_expires = time(NULL) + 3600;
+                return API_OK;
+            }
+            /* Token expired - try refresh */
+            if (oauth_refresh(api->oauth)) {
+                oauth_save_tokens(api->oauth, "oauth_tokens.json");
+                api->state = AUTH_STATE_AUTHENTICATED;
+                api->token_expires = time(NULL) + 3600;
+                return API_OK;
             }
         }
 
@@ -340,66 +368,14 @@ api_error api_authenticate(iracing_api *api)
         }
     }
 
-    /* Legacy auth (no longer supported by iRacing since Dec 2025) */
-    if (!api->username || !api->password_hash) {
-        api->last_error = API_ERROR_INVALID_CREDENTIALS;
-        snprintf(api->last_error_msg, sizeof(api->last_error_msg),
-                 "No credentials set. Use api_set_oauth() for OAuth2 authentication.");
-        return API_ERROR_INVALID_CREDENTIALS;
-    }
-
-    api->state = AUTH_STATE_AUTHENTICATING;
-
-    /* Build auth request body */
-    char body[1024];
-    snprintf(body, sizeof(body),
-             "{\"email\":\"%s\",\"password\":\"%s\"}",
-             api->username, api->password_hash);
-
-    /* POST to auth endpoint */
-    char url[256];
-    snprintf(url, sizeof(url), "%s%s", IRACING_API_BASE, IRACING_AUTH_ENDPOINT);
-
-    http_response *resp = http_post_json(api->http, url, body);
-
-    /* Clear request body (contains credentials) */
-    memset(body, 0, sizeof(body));
-
-    if (!resp) {
-        api->state = AUTH_STATE_FAILED;
-        return map_http_status(api, NULL);
-    }
-
-    api_error err = map_http_status(api, resp);
-
-    if (http_response_ok(resp)) {
-        /* Parse response for authcode (optional - we use cookies) */
-        json_value *json = json_parse(resp->body);
-        if (json) {
-            /* Check for verification_required (2FA enabled) */
-            json_value *verify = json_object_get(json, "verificationRequired");
-            if (verify && json_get_bool(verify)) {
-                api->state = AUTH_STATE_FAILED;
-                api->last_error = API_ERROR_INVALID_CREDENTIALS;
-                snprintf(api->last_error_msg, sizeof(api->last_error_msg),
-                         "Account has 2FA enabled. Legacy auth requires 2FA disabled.");
-                json_free(json);
-                http_response_free(resp);
-                return API_ERROR_INVALID_CREDENTIALS;
-            }
-
-            json_free(json);
-        }
-
-        api->state = AUTH_STATE_AUTHENTICATED;
-        api->token_expires = time(NULL) + (2 * 60 * 60);  /* ~2 hours */
-        err = API_OK;
-    } else {
-        api->state = AUTH_STATE_FAILED;
-    }
-
-    http_response_free(resp);
-    return err;
+    /* Legacy auth was retired by iRacing on December 9, 2025.
+     * All API access now requires OAuth2. */
+    api->last_error = API_ERROR_NOT_IMPLEMENTED;
+    snprintf(api->last_error_msg, sizeof(api->last_error_msg),
+             "Legacy authentication was retired by iRacing (Dec 2025). "
+             "Use api_set_oauth() for OAuth2 authentication.");
+    api->state = AUTH_STATE_FAILED;
+    return API_ERROR_NOT_IMPLEMENTED;
 }
 
 api_error api_refresh_token(iracing_api *api)
@@ -599,7 +575,7 @@ api_error api_fetch_tracks(iracing_api *api, ira_database *db)
 
         track->latitude = (float)json_get_number(json_object_get(t, "latitude"));
         track->longitude = (float)json_get_number(json_object_get(t, "longitude"));
-        track->night_lighting = json_get_bool(json_object_get(t, "has_opt_path"));
+        track->night_lighting = json_get_bool(json_object_get(t, "night_lighting"));
         track->ai_enabled = json_get_bool(json_object_get(t, "ai_enabled"));
     }
 
@@ -740,12 +716,21 @@ api_error api_fetch_series(iracing_api *api, ira_database *db)
 
         series->category = json_get_int(json_object_get(s, "category_id"));
 
-        /* Parse allowed_licenses to get min_license */
+        /* Parse allowed_licenses to get min_license (lowest license_group) */
         json_value *licenses = json_object_get(s, "allowed_licenses");
         if (licenses && json_get_type(licenses) == JSON_ARRAY && json_array_length(licenses) > 0) {
-            json_value *first_lic = json_array_get(licenses, 0);
-            if (first_lic) {
-                series->min_license = json_get_int(json_object_get(first_lic, "group_name"));
+            int min_group = 99;
+            for (int l = 0; l < json_array_length(licenses); l++) {
+                json_value *lic = json_array_get(licenses, l);
+                if (lic) {
+                    int group = json_get_int(json_object_get(lic, "license_group"));
+                    if (group > 0 && group < min_group) {
+                        min_group = group;
+                    }
+                }
+            }
+            if (min_group < 99) {
+                series->min_license = min_group;
             }
         }
 
@@ -829,6 +814,10 @@ api_error api_fetch_seasons(iracing_api *api, ira_database *db, int year, int qu
         season->fixed_setup = json_get_bool(json_object_get(s, "fixed_setup"));
         season->official = json_get_bool(json_object_get(s, "official"));
         season->active = json_get_bool(json_object_get(s, "active"));
+        season->complete = json_get_bool(json_object_get(s, "complete"));
+        season->multiclass = json_get_bool(json_object_get(s, "multiclass"));
+        season->has_supersessions = json_get_bool(json_object_get(s, "has_supersessions"));
+        season->current_week = json_get_int(json_object_get(s, "race_week"));
         season->license_group = json_get_int(json_object_get(s, "license_group"));
 
         /* Parse schedules array */
@@ -862,10 +851,38 @@ api_error api_fetch_seasons(iracing_api *api, ira_database *db, int year, int qu
                         week->race_time_limit_mins = json_get_int(json_object_get(w, "race_time_limit"));
                         week->race_lap_limit = json_get_int(json_object_get(w, "race_lap_limit"));
 
-                        /* Parse car_class_ids or car_ids */
-                        json_value *car_classes = json_object_get(w, "car_class_ids");
-                        if (car_classes && json_get_type(car_classes) == JSON_ARRAY) {
-                            /* Would need to resolve car class to cars */
+                        /* Parse start_date */
+                        const char *start_str = json_get_string(json_object_get(w, "start_date"));
+                        if (start_str) {
+                            struct tm stm = {0};
+                            int sy, smo, sd, sh, smi, ss;
+                            if (sscanf(start_str, "%d-%d-%dT%d:%d:%d",
+                                       &sy, &smo, &sd, &sh, &smi, &ss) >= 3) {
+                                stm.tm_year = sy - 1900;
+                                stm.tm_mon = smo - 1;
+                                stm.tm_mday = sd;
+                                stm.tm_hour = sh;
+                                stm.tm_min = smi;
+                                stm.tm_sec = ss;
+                                week->start_date = mktime(&stm);
+                            }
+                        }
+
+                        /* Parse race_time_descriptors for session timing */
+                        json_value *descriptors = json_object_get(w, "race_time_descriptors");
+                        if (descriptors && json_get_type(descriptors) == JSON_ARRAY) {
+                            int desc_count = json_array_length(descriptors);
+                            for (int d = 0; d < desc_count; d++) {
+                                json_value *desc = json_array_get(descriptors, d);
+                                if (!desc) continue;
+                                bool is_super = json_get_bool(json_object_get(desc, "super_session"));
+                                if (is_super) {
+                                    week->super_session = true;
+                                } else {
+                                    week->session_mins = json_get_int(json_object_get(desc, "session_minutes"));
+                                    week->repeat_mins = json_get_int(json_object_get(desc, "repeat_minutes"));
+                                }
+                            }
                         }
                     }
                 }
