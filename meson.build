@@ -1,5 +1,5 @@
 project('ira', 'c',
-  version : '0.1.0',
+  version : '2026.2.0',
   license : 'Proprietary',
   default_options : [
     'c_std=c11',
@@ -57,20 +57,35 @@ launcher_sources = files(
   'src/launcher/launcher.c',
 )
 
+controller_sources = files(
+  'src/controller/app_controller.c',
+)
+
 telemetry_sources = files(
   'src/telemetry/telemetry_log.c',
+)
+
+ui_sources = files(
+  'src/ui/console.c',
 )
 
 main_sources = files(
   'src/main.c',
 )
 
-# Include directories
+# Generate version header from template
+version_h = configure_file(
+  input : 'src/version.h.in',
+  output : 'version.h',
+  configuration : {'IRA_VERSION': meson.project_version()}
+)
+
+# Include directories (build dir for generated version.h)
 inc_dirs = include_directories('src')
 
 # Build the executable
 ira_exe = executable('ira',
-  main_sources + irsdk_sources + util_sources + data_sources + filter_sources + api_sources + launcher_sources + telemetry_sources,
+  main_sources + irsdk_sources + util_sources + data_sources + filter_sources + api_sources + launcher_sources + controller_sources + telemetry_sources + ui_sources + [version_h],
   include_directories : inc_dirs,
   dependencies : windows_deps,
   install : true,

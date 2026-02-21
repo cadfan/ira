@@ -103,6 +103,9 @@ void filter_results_clear(filter_results *results);
 /* Apply filter to all seasons in database, populates results */
 bool filter_apply(ira_database *db, filter_results *results);
 
+/* Apply with all filters temporarily disabled (show everything) */
+bool filter_apply_show_all(ira_database *db, filter_results *results);
+
 /* Apply filter to a single season */
 bool filter_season(ira_database *db, ira_season *season, filter_results *results);
 

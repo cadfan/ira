@@ -334,6 +334,33 @@ bool filter_apply(ira_database *db, filter_results *results)
     return true;
 }
 
+bool filter_apply_show_all(ira_database *db, filter_results *results)
+{
+    if (!db || !results) return false;
+
+    /* Save current filter, override with pass-everything settings */
+    ira_filter saved = db->filter;
+
+    db->filter.owned_content_only = false;
+    db->filter.category_count = 0;
+    db->filter.min_license = LICENSE_ROOKIE;
+    db->filter.max_license = LICENSE_PRO_WC;
+    db->filter.fixed_setup_only = false;
+    db->filter.open_setup_only = false;
+    db->filter.official_only = false;
+    db->filter.min_race_mins = 0;
+    db->filter.max_race_mins = 0;
+    db->filter.excluded_series_count = 0;
+    db->filter.excluded_track_count = 0;
+
+    bool ok = filter_apply(db, results);
+
+    /* Restore original filter */
+    db->filter = saved;
+
+    return ok;
+}
+
 /*
  * Comparison functions for sorting
  */

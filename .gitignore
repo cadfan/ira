@@ -26,6 +26,9 @@ meson-info/
 meson-logs/
 meson-private/
 
+# Generated files
+src/version.h
+
 # OAuth credentials and tokens (NEVER commit these)
 oauth_config.json
 oauth_tokens.json
