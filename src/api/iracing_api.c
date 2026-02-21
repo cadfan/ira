@@ -15,7 +15,6 @@
 
 #include "iracing_api.h"
 #include "../util/http.h"
-#include "../util/crypto.h"
 #include "../util/json.h"
 #include "../util/oauth.h"
 
@@ -201,14 +200,6 @@ void api_destroy(iracing_api *api)
 
     if (api->http) http_session_destroy(api->http);
     if (api->oauth) oauth_destroy(api->oauth);
-    if (api->access_token) free(api->access_token);
-    if (api->refresh_token) free(api->refresh_token);
-    if (api->username) free(api->username);
-    if (api->password_hash) {
-        /* Clear sensitive data before freeing */
-        memset(api->password_hash, 0, strlen(api->password_hash));
-        free(api->password_hash);
-    }
 
     free(api);
 }
@@ -216,29 +207,6 @@ void api_destroy(iracing_api *api)
 /*
  * Configuration
  */
-
-void api_set_credentials(iracing_api *api, const char *email, const char *password)
-{
-    if (!api) return;
-
-    /* Store email */
-    if (api->username) free(api->username);
-    api->username = email ? strdup(email) : NULL;
-
-    /* Hash password: Base64(SHA256(password + lowercase(email))) */
-    if (api->password_hash) {
-        memset(api->password_hash, 0, strlen(api->password_hash));
-        free(api->password_hash);
-        api->password_hash = NULL;
-    }
-
-    if (email && password) {
-        api->password_hash = crypto_iracing_password_hash(password, email);
-    }
-
-    /* Reset auth state when credentials change */
-    api->state = AUTH_STATE_NONE;
-}
 
 void api_set_oauth(iracing_api *api, const char *client_id, const char *client_secret)
 {
@@ -295,22 +263,6 @@ void api_set_timeout(iracing_api *api, int timeout_ms)
     }
 }
 
-bool api_load_tokens(iracing_api *api, const char *filename)
-{
-    (void)api;
-    (void)filename;
-    /* Legacy auth uses session cookies managed by WinHTTP, not tokens */
-    return false;
-}
-
-bool api_save_tokens(iracing_api *api, const char *filename)
-{
-    (void)api;
-    (void)filename;
-    /* Legacy auth uses session cookies managed by WinHTTP, not tokens */
-    return false;
-}
-
 /*
  * Authentication
  */
@@ -334,14 +286,12 @@ api_error api_authenticate(iracing_api *api)
                     /* If refresh fails, continue with the still-valid token */
                 }
                 api->state = AUTH_STATE_AUTHENTICATED;
-                api->token_expires = time(NULL) + 3600;
                 return API_OK;
             }
             /* Token expired - try refresh */
             if (oauth_refresh(api->oauth)) {
                 oauth_save_tokens(api->oauth, "oauth_tokens.json");
                 api->state = AUTH_STATE_AUTHENTICATED;
-                api->token_expires = time(NULL) + 3600;
                 return API_OK;
             }
         }
@@ -356,7 +306,6 @@ api_error api_authenticate(iracing_api *api)
         if (oauth_authorize(api->oauth)) {
             oauth_save_tokens(api->oauth, "oauth_tokens.json");
             api->state = AUTH_STATE_AUTHENTICATED;
-            api->token_expires = time(NULL) + 3600;
             printf("Authentication successful!\n");
             return API_OK;
         } else {
@@ -380,14 +329,18 @@ api_error api_authenticate(iracing_api *api)
 
 api_error api_refresh_token(iracing_api *api)
 {
-    /* Legacy auth: re-authenticate to refresh session */
     if (!api) return API_ERROR_NOT_AUTHENTICATED;
 
-    if (api->username && api->password_hash) {
-        return api_authenticate(api);
+    if (api->oauth && oauth_refresh(api->oauth)) {
+        oauth_save_tokens(api->oauth, "oauth_tokens.json");
+        api->state = AUTH_STATE_AUTHENTICATED;
+        return API_OK;
     }
 
     api->last_error = API_ERROR_NOT_AUTHENTICATED;
+    snprintf(api->last_error_msg, sizeof(api->last_error_msg),
+             "Token refresh failed. Re-authenticate with api_authenticate().");
+    api->state = AUTH_STATE_EXPIRED;
     return API_ERROR_NOT_AUTHENTICATED;
 }
 
@@ -399,10 +352,8 @@ bool api_is_authenticated(iracing_api *api)
 
 bool api_token_expiring(iracing_api *api, int margin_seconds)
 {
-    if (!api || api->token_expires == 0) return true;
-
-    time_t now = time(NULL);
-    return (api->token_expires - now) < margin_seconds;
+    if (!api || !api->oauth) return true;
+    return oauth_token_expiring(api->oauth, margin_seconds);
 }
 
 /*

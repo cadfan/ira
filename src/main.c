@@ -677,15 +677,22 @@ static void sync_data(ira_database *db)
         return;
     }
 
-    /* Try to load saved tokens */
-    /* TODO: token file path */
+    /* Load OAuth credentials from config file */
+    if (!api_load_oauth_config(api, "oauth_config.json")) {
+        printf("Error: Could not load OAuth credentials.\n");
+        printf("Create an oauth_config.json file with:\n");
+        printf("  {\n");
+        printf("    \"client_id\": \"YOUR_CLIENT_ID\",\n");
+        printf("    \"client_secret\": \"YOUR_CLIENT_SECRET\"\n");
+        printf("  }\n");
+        api_destroy(api);
+        return;
+    }
 
     /* Authenticate */
     api_error err = api_authenticate(api);
     if (err != API_OK) {
-        printf("Authentication: %s\n", api_get_last_error(api));
-        printf("\nNote: iRacing API access requires OAuth approval.\n");
-        printf("Once approved, credentials can be set via config file.\n");
+        printf("Authentication failed: %s\n", api_get_last_error(api));
         api_destroy(api);
         return;
     }
@@ -703,6 +710,10 @@ static void sync_data(ira_database *db)
     err = api_fetch_series(api, db);
     printf("  %s\n", err == API_OK ? "OK" : api_error_string(err));
 
+    printf("Fetching car classes...\n");
+    err = api_fetch_car_classes(api, db);
+    printf("  %s\n", err == API_OK ? "OK" : api_error_string(err));
+
     printf("Fetching seasons...\n");
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
@@ -710,6 +721,28 @@ static void sync_data(ira_database *db)
     int quarter = (tm->tm_mon / 3) + 1;
     err = api_fetch_seasons(api, db, year, quarter);
     printf("  %s\n", err == API_OK ? "OK" : api_error_string(err));
+
+    /* Resolve car_ids in schedule weeks from car classes */
+    if (db->season_count > 0 && db->car_class_count > 0) {
+        for (int i = 0; i < db->season_count; i++) {
+            ira_season *season = &db->seasons[i];
+            /* Collect car_ids from all car classes in this season */
+            int ids[16];
+            int id_count = 0;
+            for (int c = 0; c < season->car_class_count && id_count < 16; c++) {
+                ira_car_class *cc = database_get_car_class(db, season->car_class_ids[c]);
+                if (!cc) continue;
+                for (int k = 0; k < cc->car_count && id_count < 16; k++) {
+                    ids[id_count++] = cc->car_ids[k];
+                }
+            }
+            /* Apply to all schedule weeks */
+            for (int j = 0; j < season->schedule_count; j++) {
+                memcpy(season->schedule[j].car_ids, ids, id_count * sizeof(int));
+                season->schedule[j].car_count = id_count;
+            }
+        }
+    }
 
     printf("Fetching owned content...\n");
     err = api_fetch_owned_content(api, db);

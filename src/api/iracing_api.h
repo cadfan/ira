@@ -54,22 +54,17 @@ typedef struct {
     /* HTTP Session */
     http_session *http;
 
-    /* OAuth2 Client (optional - for OAuth auth) */
+    /* OAuth2 Client */
     oauth_client *oauth;
 
     /* Authentication */
     auth_state state;
-    char *access_token;
-    char *refresh_token;
-    time_t token_expires;
 
     /* Rate limiting */
     int rate_limit_remaining;
     time_t rate_limit_reset;
 
     /* Configuration */
-    char *username;
-    char *password_hash;  /* SHA256(password + lowercase(email)) base64 encoded */
     int timeout_ms;
 
     /* Last error */
@@ -91,20 +86,24 @@ void api_destroy(iracing_api *api);
  * Configuration
  */
 
-/* Set credentials for legacy authentication (no longer supported) */
-void api_set_credentials(iracing_api *api, const char *email, const char *password);
-
 /* Configure OAuth2 authentication (required since Dec 2025) */
 void api_set_oauth(iracing_api *api, const char *client_id, const char *client_secret);
 
+/*
+ * Load OAuth credentials from a JSON config file.
+ *
+ * Expected format:
+ * {
+ *   "client_id": "...",
+ *   "client_secret": "..." (optional)
+ * }
+ *
+ * Returns true if credentials were loaded and applied.
+ */
+bool api_load_oauth_config(iracing_api *api, const char *filename);
+
 /* Set request timeout in milliseconds */
 void api_set_timeout(iracing_api *api, int timeout_ms);
-
-/* Load saved tokens from file (for session persistence) */
-bool api_load_tokens(iracing_api *api, const char *filename);
-
-/* Save tokens to file */
-bool api_save_tokens(iracing_api *api, const char *filename);
 
 /*
  * Authentication
@@ -119,7 +118,7 @@ api_error api_refresh_token(iracing_api *api);
 /* Check if currently authenticated */
 bool api_is_authenticated(iracing_api *api);
 
-/* Check if token needs refresh */
+/* Check if token needs refresh (delegates to OAuth layer) */
 bool api_token_expiring(iracing_api *api, int margin_seconds);
 
 /*

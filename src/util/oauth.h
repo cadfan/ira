@@ -32,6 +32,7 @@ typedef struct {
     char *redirect_uri;     /* e.g., "http://localhost:8080/callback" */
     int callback_port;      /* Port for local callback server */
     char *scope;            /* e.g., "iracing.auth" */
+    char *audience;         /* API audience, e.g., "data-server" */
 } oauth_config;
 
 /*
@@ -61,6 +62,9 @@ bool oauth_token_valid(oauth_client *client);
 
 /* Check if access token needs refresh (within margin_seconds of expiry) */
 bool oauth_token_expiring(oauth_client *client, int margin_seconds);
+
+/* Get absolute expiry time of the access token (0 if no token) */
+time_t oauth_get_token_expiry(oauth_client *client);
 
 /*
  * Authentication Flow
@@ -112,6 +116,7 @@ const char *oauth_get_error(oauth_client *client);
 #define OAUTH_AUTH_URL      "https://oauth.iracing.com/oauth2/authorize"
 #define OAUTH_TOKEN_URL     "https://oauth.iracing.com/oauth2/token"
 #define OAUTH_DEFAULT_PORT  8080
-#define OAUTH_DEFAULT_SCOPE "iracing.auth"
+#define OAUTH_DEFAULT_SCOPE    "iracing.auth"
+#define OAUTH_DEFAULT_AUDIENCE "data-server"
 
 #endif /* IRA_OAUTH_H */

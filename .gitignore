@@ -26,5 +26,9 @@ meson-info/
 meson-logs/
 meson-private/
 
+# OAuth credentials and tokens (NEVER commit these)
+oauth_config.json
+oauth_tokens.json
+
 # Claude Code
 .claude/

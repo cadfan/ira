@@ -113,27 +113,33 @@ char *crypto_iracing_password_hash(const char *password, const char *email)
 {
     if (!password || !email) return NULL;
 
-    size_t pass_len = strlen(password);
-    size_t email_len = strlen(email);
+    /* Trim leading/trailing whitespace from identifier per iRacing spec */
+    const char *id_start = email;
+    while (*id_start && isspace((unsigned char)*id_start)) id_start++;
+    const char *id_end = email + strlen(email);
+    while (id_end > id_start && isspace((unsigned char)*(id_end - 1))) id_end--;
 
-    /* Allocate buffer for: password + lowercase(email) */
-    char *concat = malloc(pass_len + email_len + 1);
+    size_t pass_len = strlen(password);
+    size_t id_len = (size_t)(id_end - id_start);
+
+    /* Allocate buffer for: password + lowercase(trimmed identifier) */
+    char *concat = malloc(pass_len + id_len + 1);
     if (!concat) return NULL;
 
     /* Copy password */
     memcpy(concat, password, pass_len);
 
-    /* Copy email and convert to lowercase */
-    for (size_t i = 0; i < email_len; i++) {
-        concat[pass_len + i] = (char)tolower((unsigned char)email[i]);
+    /* Copy identifier trimmed and lowercased */
+    for (size_t i = 0; i < id_len; i++) {
+        concat[pass_len + i] = (char)tolower((unsigned char)id_start[i]);
     }
-    concat[pass_len + email_len] = '\0';
+    concat[pass_len + id_len] = '\0';
 
     /* Compute SHA256 */
-    unsigned char *hash = crypto_sha256(concat, pass_len + email_len);
+    unsigned char *hash = crypto_sha256(concat, pass_len + id_len);
 
     /* Clear and free the concatenation (contains password) */
-    memset(concat, 0, pass_len + email_len);
+    memset(concat, 0, pass_len + id_len);
     free(concat);
 
     if (!hash) return NULL;

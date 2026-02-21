@@ -123,12 +123,12 @@ typedef struct {
     char track_name[128];
     char config_name[64];
     time_t start_date;
-    time_t end_date;
     int race_time_limit_mins;   /* 0 = lap-based */
     int race_lap_limit;         /* 0 = time-based */
-    int practice_mins;
-    int qualify_mins;
-    int warmup_mins;
+    /* From race_time_descriptors (non-supersession entry) */
+    int session_mins;           /* Total session length (practice+qual+race) */
+    int repeat_mins;            /* How often sessions repeat (0=not repeating) */
+    bool super_session;         /* Has a super session descriptor */
     int car_ids[16];
     int car_count;
 } ira_schedule_week;

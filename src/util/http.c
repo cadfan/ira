@@ -279,7 +279,8 @@ void http_session_set_user_agent(http_session *session, const char *user_agent)
  */
 static http_response *send_request(http_session *session, const char *url,
                                    const char *method, const char *body,
-                                   const wchar_t *content_type)
+                                   const wchar_t *content_type,
+                                   const char *bearer_token)
 {
     if (!session || !url) return NULL;
 
@@ -291,7 +292,6 @@ static http_response *send_request(http_session *session, const char *url,
         set_error(session, "Failed to parse URL");
         return NULL;
     }
-
 
     http_response *resp = NULL;
     HINTERNET connect = NULL;
@@ -332,6 +332,19 @@ static http_response *send_request(http_session *session, const char *url,
 
     /* Add required headers */
     WinHttpAddRequestHeaders(request, L"Accept: application/json", (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD);
+
+    /* Add Authorization header if bearer token provided */
+    if (bearer_token) {
+        size_t token_len = strlen(bearer_token);
+        size_t header_len = token_len + 30;  /* "Authorization: Bearer " + token + null */
+        wchar_t *auth_header = malloc(header_len * sizeof(wchar_t));
+        if (auth_header) {
+            swprintf(auth_header, header_len, L"Authorization: Bearer %hs", bearer_token);
+            WinHttpAddRequestHeaders(request, auth_header, (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD);
+            SecureZeroMemory(auth_header, header_len * sizeof(wchar_t));
+            free(auth_header);
+        }
+    }
 
     /* Add Content-Type header if specified */
     if (content_type) {
@@ -377,7 +390,6 @@ static http_response *send_request(http_session *session, const char *url,
     /* Parse rate limit headers */
     parse_rate_limit_headers(request, resp);
 
-
     /* Read body */
     if (!read_response_body(request, resp)) {
         set_error(session, "Failed to read response body");
@@ -400,129 +412,22 @@ cleanup:
 
 http_response *http_post_json(http_session *session, const char *url, const char *json_body)
 {
-    return send_request(session, url, "POST", json_body, L"application/json");
+    return send_request(session, url, "POST", json_body, L"application/json", NULL);
 }
 
 http_response *http_post_form(http_session *session, const char *url, const char *form_body)
 {
-    return send_request(session, url, "POST", form_body, L"application/x-www-form-urlencoded");
+    return send_request(session, url, "POST", form_body, L"application/x-www-form-urlencoded", NULL);
 }
 
 http_response *http_get(http_session *session, const char *url)
 {
-    return send_request(session, url, "GET", NULL, NULL);
+    return send_request(session, url, "GET", NULL, NULL, NULL);
 }
 
 http_response *http_get_with_token(http_session *session, const char *url, const char *bearer_token)
 {
-    if (!session || !url) return NULL;
-
-    session->last_error[0] = '\0';
-
-    /* Parse URL */
-    url_parts parts;
-    if (!parse_url(url, &parts)) {
-        set_error(session, "Failed to parse URL");
-        return NULL;
-    }
-
-
-    http_response *resp = NULL;
-    HINTERNET connect = NULL;
-    HINTERNET request = NULL;
-
-    /* Connect to host */
-    connect = WinHttpConnect(session->session, parts.host, parts.port, 0);
-    if (!connect) {
-        set_win_error(session, "WinHttpConnect failed", GetLastError());
-        goto cleanup;
-    }
-
-    /* Create request */
-    DWORD flags = parts.secure ? WINHTTP_FLAG_SECURE : 0;
-
-    request = WinHttpOpenRequest(
-        connect,
-        L"GET",
-        parts.path,
-        NULL,
-        WINHTTP_NO_REFERER,
-        WINHTTP_DEFAULT_ACCEPT_TYPES,
-        flags
-    );
-
-    if (!request) {
-        set_win_error(session, "WinHttpOpenRequest failed", GetLastError());
-        goto cleanup;
-    }
-
-    /* Set timeouts */
-    int timeout = session->timeout_ms;
-    WinHttpSetOption(request, WINHTTP_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
-    WinHttpSetOption(request, WINHTTP_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
-    WinHttpSetOption(request, WINHTTP_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
-
-    /* Add Authorization header */
-    if (bearer_token) {
-        size_t token_len = strlen(bearer_token);
-        size_t header_len = token_len + 30;  /* "Authorization: Bearer " + token + null */
-        wchar_t *auth_header = malloc(header_len * sizeof(wchar_t));
-        if (auth_header) {
-            swprintf(auth_header, header_len, L"Authorization: Bearer %hs", bearer_token);
-            WinHttpAddRequestHeaders(request, auth_header, (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD);
-            free(auth_header);
-        }
-    }
-
-    /* Add Accept header */
-    WinHttpAddRequestHeaders(request, L"Accept: application/json", (DWORD)-1, WINHTTP_ADDREQ_FLAG_ADD);
-
-    /* Send request */
-    if (!WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
-        set_win_error(session, "WinHttpSendRequest failed", GetLastError());
-        goto cleanup;
-    }
-
-    /* Receive response */
-    if (!WinHttpReceiveResponse(request, NULL)) {
-        set_win_error(session, "WinHttpReceiveResponse failed", GetLastError());
-        goto cleanup;
-    }
-
-    /* Allocate response */
-    resp = calloc(1, sizeof(http_response));
-    if (!resp) {
-        set_error(session, "Memory allocation failed");
-        goto cleanup;
-    }
-
-    /* Get status code */
-    DWORD status_code = 0;
-    DWORD size = sizeof(status_code);
-    WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                        WINHTTP_HEADER_NAME_BY_INDEX, &status_code, &size,
-                        WINHTTP_NO_HEADER_INDEX);
-    resp->status_code = (int)status_code;
-
-
-    /* Parse rate limit headers */
-    parse_rate_limit_headers(request, resp);
-
-    /* Read body */
-    if (!read_response_body(request, resp)) {
-        set_error(session, "Failed to read response body");
-        http_response_free(resp);
-        resp = NULL;
-        goto cleanup;
-    }
-
-cleanup:
-    if (request) WinHttpCloseHandle(request);
-    if (connect) WinHttpCloseHandle(connect);
-    free_url_parts(&parts);
-
-    return resp;
+    return send_request(session, url, "GET", NULL, NULL, bearer_token);
 }
 
 /*

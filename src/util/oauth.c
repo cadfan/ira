@@ -390,9 +390,15 @@ static bool exchange_code_for_tokens(oauth_client *client, const char *code)
         return false;
     }
 
-    /* Store tokens */
-    free(client->tokens.access_token);
-    free(client->tokens.refresh_token);
+    /* Clear old tokens before replacing */
+    if (client->tokens.access_token) {
+        memset(client->tokens.access_token, 0, strlen(client->tokens.access_token));
+        free(client->tokens.access_token);
+    }
+    if (client->tokens.refresh_token) {
+        memset(client->tokens.refresh_token, 0, strlen(client->tokens.refresh_token));
+        free(client->tokens.refresh_token);
+    }
     free(client->tokens.token_type);
 
     client->tokens.access_token = strdup(access);
@@ -448,9 +454,12 @@ void oauth_destroy(oauth_client *client)
 {
     if (!client) return;
 
-    /* Free config */
+    /* Free config (clear secrets first) */
     free(client->config.client_id);
-    free(client->config.client_secret);
+    if (client->config.client_secret) {
+        memset(client->config.client_secret, 0, strlen(client->config.client_secret));
+        free(client->config.client_secret);
+    }
     free(client->config.redirect_uri);
     free(client->config.scope);
     free(client->config.audience);
@@ -501,6 +510,12 @@ bool oauth_token_expiring(oauth_client *client, int margin_seconds)
 {
     if (!client || !client->tokens.access_token) return true;
     return (client->tokens.access_expires - time(NULL)) < margin_seconds;
+}
+
+time_t oauth_get_token_expiry(oauth_client *client)
+{
+    if (!client || !client->tokens.access_token) return 0;
+    return client->tokens.access_expires;
 }
 
 /*
@@ -752,9 +767,15 @@ bool oauth_load_tokens(oauth_client *client, const char *filename)
         return false;
     }
 
-    /* Free existing tokens */
-    free(client->tokens.access_token);
-    free(client->tokens.refresh_token);
+    /* Clear old tokens before replacing */
+    if (client->tokens.access_token) {
+        memset(client->tokens.access_token, 0, strlen(client->tokens.access_token));
+        free(client->tokens.access_token);
+    }
+    if (client->tokens.refresh_token) {
+        memset(client->tokens.refresh_token, 0, strlen(client->tokens.refresh_token));
+        free(client->tokens.refresh_token);
+    }
     free(client->tokens.token_type);
 
     client->tokens.access_token = strdup(access);
