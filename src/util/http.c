@@ -130,21 +130,32 @@ static void free_url_parts(url_parts *parts)
  */
 static void parse_rate_limit_headers(HINTERNET request, http_response *resp)
 {
-    wchar_t buffer[64];
-    DWORD size = sizeof(buffer);
+    wchar_t buffer[64] = {0};
+    DWORD size;
 
-    /* X-RateLimit-Remaining */
-    if (WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, L"X-RateLimit-Remaining",
-                            buffer, &size, WINHTTP_NO_HEADER_INDEX)) {
-        resp->rate_limit_remaining = _wtoi(buffer);
-    }
-
-    /* X-RateLimit-Reset */
+    /* Try both header conventions: "RateLimit-*" (iRacing) and "X-RateLimit-*" */
     size = sizeof(buffer);
-    if (WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, L"X-RateLimit-Reset",
-                            buffer, &size, WINHTTP_NO_HEADER_INDEX)) {
-        resp->rate_limit_reset = _wtoi(buffer);
+    if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, L"RateLimit-Remaining",
+                             buffer, &size, WINHTTP_NO_HEADER_INDEX)) {
+        size = sizeof(buffer);
+        if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, L"X-RateLimit-Remaining",
+                                 buffer, &size, WINHTTP_NO_HEADER_INDEX)) {
+            buffer[0] = L'\0';
+        }
     }
+    resp->rate_limit_remaining = _wtoi(buffer);
+
+    buffer[0] = L'\0';
+    size = sizeof(buffer);
+    if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, L"RateLimit-Reset",
+                             buffer, &size, WINHTTP_NO_HEADER_INDEX)) {
+        size = sizeof(buffer);
+        if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_CUSTOM, L"X-RateLimit-Reset",
+                                 buffer, &size, WINHTTP_NO_HEADER_INDEX)) {
+            buffer[0] = L'\0';
+        }
+    }
+    resp->rate_limit_reset = _wtoi(buffer);
 }
 
 /*

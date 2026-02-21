@@ -75,21 +75,31 @@ static char *generate_random_string(int length)
 
     HCRYPTPROV prov;
     if (!CryptAcquireContext(&prov, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
-        /* Fallback to less secure random */
-        srand((unsigned int)time(NULL));
-        for (int i = 0; i < length; i++) {
-            str[i] = charset[rand() % (sizeof(charset) - 1)];
-        }
-    } else {
-        unsigned char *buf = malloc(length);
-        if (buf && CryptGenRandom(prov, length, buf)) {
-            for (int i = 0; i < length; i++) {
-                str[i] = charset[buf[i] % (sizeof(charset) - 1)];
-            }
-        }
+        /* CSPRNG unavailable - fail rather than use weak random */
+        free(str);
+        return NULL;
+    }
+
+    unsigned char *buf = malloc(length);
+    if (!buf) {
+        CryptReleaseContext(prov, 0);
+        free(str);
+        return NULL;
+    }
+
+    if (!CryptGenRandom(prov, length, buf)) {
         free(buf);
         CryptReleaseContext(prov, 0);
+        free(str);
+        return NULL;
     }
+
+    for (int i = 0; i < length; i++) {
+        str[i] = charset[buf[i] % (sizeof(charset) - 1)];
+    }
+
+    free(buf);
+    CryptReleaseContext(prov, 0);
 
     str[length] = '\0';
     return str;
@@ -198,10 +208,10 @@ static char *wait_for_callback(int port, const char *expected_state, int timeout
     int opt = 1;
     setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, (char*)&opt, sizeof(opt));
 
-    /* Bind to port */
+    /* Bind to loopback only - reject connections from other hosts */
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = htons((u_short)port);
 
     if (bind(server_socket, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
@@ -315,16 +325,26 @@ static bool exchange_code_for_tokens(oauth_client *client, const char *code)
 
     free(encoded_uri);
 
-    /* Add client_secret if we have one */
+    /* Add client_secret if we have one (must be masked per iRacing spec) */
     if (client->config.client_secret) {
-        size_t body_len = strlen(body);
-        size_t remaining = sizeof(body) - body_len;
-        snprintf(body + body_len, remaining, "&client_secret=%s",
-                 client->config.client_secret);
+        /* Mask: SHA256(secret + lowercase(client_id)), then base64 */
+        char *masked = crypto_iracing_password_hash(
+            client->config.client_secret, client->config.client_id);
+        if (masked) {
+            char *encoded_secret = url_encode(masked);
+            if (encoded_secret) {
+                size_t body_len = strlen(body);
+                size_t remaining = sizeof(body) - body_len;
+                snprintf(body + body_len, remaining,
+                         "&client_secret=%s", encoded_secret);
+                free(encoded_secret);
+            }
+            memset(masked, 0, strlen(masked));
+            free(masked);
+        }
     }
 
     /* Make token request */
-    /* Note: Token endpoint uses form-urlencoded, not JSON */
     char url[256];
     snprintf(url, sizeof(url), "%s", OAUTH_TOKEN_URL);
 
@@ -403,13 +423,16 @@ oauth_client *oauth_create(const oauth_config *config)
     client->config.client_secret = config->client_secret ? strdup(config->client_secret) : NULL;
     client->config.redirect_uri = config->redirect_uri
         ? strdup(config->redirect_uri)
-        : strdup("http://localhost:8080/callback");
+        : strdup("http://127.0.0.1:8080/callback");
     client->config.callback_port = config->callback_port > 0
         ? config->callback_port
         : OAUTH_DEFAULT_PORT;
     client->config.scope = config->scope
         ? strdup(config->scope)
         : strdup(OAUTH_DEFAULT_SCOPE);
+    client->config.audience = config->audience
+        ? strdup(config->audience)
+        : strdup(OAUTH_DEFAULT_AUDIENCE);
 
     /* Create HTTP session */
     client->http = http_session_create();
@@ -430,6 +453,7 @@ void oauth_destroy(oauth_client *client)
     free(client->config.client_secret);
     free(client->config.redirect_uri);
     free(client->config.scope);
+    free(client->config.audience);
 
     /* Free tokens (clear sensitive data first) */
     if (client->tokens.access_token) {
@@ -522,6 +546,8 @@ bool oauth_authorize(oauth_client *client)
         return false;
     }
 
+    /* Note: audience is configured server-side per client registration,
+     * not sent as a request parameter. */
     char auth_url[2048];
     snprintf(auth_url, sizeof(auth_url),
         "%s?client_id=%s"
@@ -597,10 +623,20 @@ bool oauth_refresh(oauth_client *client)
         client->tokens.refresh_token);
 
     if (client->config.client_secret) {
-        size_t body_len = strlen(body);
-        size_t remaining = sizeof(body) - body_len;
-        snprintf(body + body_len, remaining, "&client_secret=%s",
-                 client->config.client_secret);
+        char *masked = crypto_iracing_password_hash(
+            client->config.client_secret, client->config.client_id);
+        if (masked) {
+            char *encoded_secret = url_encode(masked);
+            if (encoded_secret) {
+                size_t body_len = strlen(body);
+                size_t remaining = sizeof(body) - body_len;
+                snprintf(body + body_len, remaining,
+                         "&client_secret=%s", encoded_secret);
+                free(encoded_secret);
+            }
+            memset(masked, 0, strlen(masked));
+            free(masked);
+        }
     }
 
     http_response *resp = http_post_form(client->http, OAUTH_TOKEN_URL, body);
