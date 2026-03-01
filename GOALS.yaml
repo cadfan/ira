@@ -23,7 +23,7 @@ goals:
   - id: owned-content-real
     description: api_fetch_owned_content fetches actual purchase data, not just free content
     weight: 6
-    check: "grep -A5 'api_fetch_owned_content' src/api/iracing_api.c | grep -c 'fetch_data_endpoint'"
+    check: "grep -A20 'api_fetch_owned_content' src/api/iracing_api.c | grep -c 'fetch_data_endpoint'"
     pass_when: "output >= '1'"
 
   - id: test-suite

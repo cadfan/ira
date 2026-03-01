@@ -892,53 +892,118 @@ api_error api_fetch_owned_content(iracing_api *api, ira_database *db)
     if (!api_is_authenticated(api)) return API_ERROR_NOT_AUTHENTICATED;
 
     /*
-     * iRacing doesn't have a direct "owned content" endpoint.
-     * We determine owned content by checking what's free + purchased.
+     * Owned content comes from two sources:
+     * 1. Free content included with subscription (from car/track data)
+     * 2. Purchased packages (car_packages/track_packages from member info)
      *
-     * For now, mark all free_with_subscription items as owned,
-     * and actual purchases would need to come from member profile.
+     * The member/info endpoint returns content_ids within each package.
      */
+
+    json_value *data = fetch_data_endpoint(api, API_MEMBER_INFO);
+    if (!data) return api->last_error;
 
     /* Free existing owned lists */
     owned_content_free(&db->owned);
 
-    /* Count free cars and tracks */
-    int free_cars = 0;
-    int free_tracks = 0;
+    /* Extract cust_id */
+    db->owned.cust_id = json_get_int(json_object_get(data, "cust_id"));
 
-    for (int i = 0; i < db->car_count; i++) {
-        if (db->cars[i].free_with_subscription) free_cars++;
-    }
-    for (int i = 0; i < db->track_count; i++) {
-        if (db->tracks[i].free_with_subscription) free_tracks++;
+    /*
+     * Count total owned: free content + purchased packages.
+     * We collect all IDs into a temporary oversize array, then shrink.
+     */
+    int max_cars = db->car_count + 512;  /* Generous upper bound */
+    int max_tracks = db->track_count + 512;
+    int *car_ids = calloc(max_cars, sizeof(int));
+    int *track_ids = calloc(max_tracks, sizeof(int));
+    int car_idx = 0;
+    int track_idx = 0;
+
+    if (!car_ids || !track_ids) {
+        free(car_ids);
+        free(track_ids);
+        json_free(data);
+        return API_ERROR_INVALID_RESPONSE;
     }
 
-    /* Allocate owned arrays */
-    if (free_cars > 0) {
-        db->owned.owned_car_ids = malloc(free_cars * sizeof(int));
+    /* Source 1: Free with subscription */
+    for (int i = 0; i < db->car_count && car_idx < max_cars; i++) {
+        if (db->cars[i].free_with_subscription) {
+            car_ids[car_idx++] = db->cars[i].car_id;
+        }
+    }
+    for (int i = 0; i < db->track_count && track_idx < max_tracks; i++) {
+        if (db->tracks[i].free_with_subscription) {
+            track_ids[track_idx++] = db->tracks[i].track_id;
+        }
+    }
+
+    /* Source 2: Purchased car packages */
+    json_value *car_packages = json_object_get(data, "car_packages");
+    if (car_packages && json_get_type(car_packages) == JSON_ARRAY) {
+        int pkg_count = json_array_length(car_packages);
+        for (int p = 0; p < pkg_count; p++) {
+            json_value *pkg = json_array_get(car_packages, p);
+            if (!pkg) continue;
+
+            json_value *content_ids = json_object_get(pkg, "content_ids");
+            if (!content_ids || json_get_type(content_ids) != JSON_ARRAY) continue;
+
+            int id_count = json_array_length(content_ids);
+            for (int c = 0; c < id_count && car_idx < max_cars; c++) {
+                int cid = json_get_int(json_array_get(content_ids, c));
+                /* Avoid duplicates (free content already added) */
+                bool dup = false;
+                for (int d = 0; d < car_idx; d++) {
+                    if (car_ids[d] == cid) { dup = true; break; }
+                }
+                if (!dup) car_ids[car_idx++] = cid;
+            }
+        }
+    }
+
+    /* Source 2: Purchased track packages */
+    json_value *track_packages = json_object_get(data, "track_packages");
+    if (track_packages && json_get_type(track_packages) == JSON_ARRAY) {
+        int pkg_count = json_array_length(track_packages);
+        for (int p = 0; p < pkg_count; p++) {
+            json_value *pkg = json_array_get(track_packages, p);
+            if (!pkg) continue;
+
+            json_value *content_ids = json_object_get(pkg, "content_ids");
+            if (!content_ids || json_get_type(content_ids) != JSON_ARRAY) continue;
+
+            int id_count = json_array_length(content_ids);
+            for (int c = 0; c < id_count && track_idx < max_tracks; c++) {
+                int tid = json_get_int(json_array_get(content_ids, c));
+                bool dup = false;
+                for (int d = 0; d < track_idx; d++) {
+                    if (track_ids[d] == tid) { dup = true; break; }
+                }
+                if (!dup) track_ids[track_idx++] = tid;
+            }
+        }
+    }
+
+    /* Copy to properly-sized arrays */
+    if (car_idx > 0) {
+        db->owned.owned_car_ids = malloc(car_idx * sizeof(int));
         if (db->owned.owned_car_ids) {
-            int idx = 0;
-            for (int i = 0; i < db->car_count; i++) {
-                if (db->cars[i].free_with_subscription) {
-                    db->owned.owned_car_ids[idx++] = db->cars[i].car_id;
-                }
-            }
-            db->owned.owned_car_count = free_cars;
+            memcpy(db->owned.owned_car_ids, car_ids, car_idx * sizeof(int));
+            db->owned.owned_car_count = car_idx;
+        }
+    }
+    if (track_idx > 0) {
+        db->owned.owned_track_ids = malloc(track_idx * sizeof(int));
+        if (db->owned.owned_track_ids) {
+            memcpy(db->owned.owned_track_ids, track_ids, track_idx * sizeof(int));
+            db->owned.owned_track_count = track_idx;
         }
     }
 
-    if (free_tracks > 0) {
-        db->owned.owned_track_ids = malloc(free_tracks * sizeof(int));
-        if (db->owned.owned_track_ids) {
-            int idx = 0;
-            for (int i = 0; i < db->track_count; i++) {
-                if (db->tracks[i].free_with_subscription) {
-                    db->owned.owned_track_ids[idx++] = db->tracks[i].track_id;
-                }
-            }
-            db->owned.owned_track_count = free_tracks;
-        }
-    }
+    free(car_ids);
+    free(track_ids);
+    json_free(data);
 
     db->owned.last_updated = time(NULL);
     return API_OK;
