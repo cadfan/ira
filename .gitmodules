@@ -1,0 +1,3 @@
+[submodule "tools/griffiths-core"]
+	path = tools/griffiths-core
+	url = https://github.com/cadfan/griffiths-core.git
