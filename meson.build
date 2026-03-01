@@ -91,3 +91,12 @@ ira_exe = executable('ira',
   dependencies : windows_deps,
   install : true,
 )
+
+# Tests
+test_filter = executable('test_filter',
+  files('tests/test_filter.c') + filter_sources + data_sources + util_sources,
+  include_directories : inc_dirs,
+  dependencies : windows_deps,
+)
+
+test('filter', test_filter)
