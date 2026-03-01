@@ -495,9 +495,9 @@ time_t filter_next_race_time(ira_season *season, ira_schedule_week *week)
         return week->start_date;
     }
 
-    /* Find the next interval boundary after now */
-    long intervals_passed = (long)(elapsed / repeat_secs);
-    time_t next = week->start_date + (time_t)((intervals_passed + 1) * repeat_secs);
+    /* Find the next interval boundary after now (use time_t to avoid 32-bit overflow) */
+    time_t intervals_passed = (time_t)(elapsed / repeat_secs);
+    time_t next = week->start_date + (intervals_passed + 1) * (time_t)repeat_secs;
 
     return next;
 }

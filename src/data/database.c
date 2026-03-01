@@ -221,7 +221,7 @@ static time_t parse_timestamp(const char *str)
         tm.tm_hour = hour;
         tm.tm_min = min;
         tm.tm_sec = sec;
-        return mktime(&tm);
+        return _mkgmtime(&tm);
     }
 
     return 0;
@@ -969,7 +969,7 @@ static void format_timestamp(time_t t, char *buf, size_t buf_size)
 {
     if (!buf || buf_size == 0) return;
 
-    struct tm *tm = localtime(&t);
+    struct tm *tm = gmtime(&t);
     if (tm) {
         snprintf(buf, buf_size, "%04d-%02d-%02dT%02d:%02d:%02d",
                  tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,

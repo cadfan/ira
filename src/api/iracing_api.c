@@ -814,7 +814,7 @@ api_error api_fetch_seasons(iracing_api *api, ira_database *db, int year, int qu
                                 stm.tm_hour = sh;
                                 stm.tm_min = smi;
                                 stm.tm_sec = ss;
-                                week->start_date = mktime(&stm);
+                                week->start_date = _mkgmtime(&stm);
                             }
                         }
 
@@ -988,17 +988,25 @@ api_error api_fetch_owned_content(iracing_api *api, ira_database *db)
     /* Copy to properly-sized arrays */
     if (car_idx > 0) {
         db->owned.owned_car_ids = malloc(car_idx * sizeof(int));
-        if (db->owned.owned_car_ids) {
-            memcpy(db->owned.owned_car_ids, car_ids, car_idx * sizeof(int));
-            db->owned.owned_car_count = car_idx;
+        if (!db->owned.owned_car_ids) {
+            free(car_ids);
+            free(track_ids);
+            json_free(data);
+            return API_ERROR_INVALID_RESPONSE;
         }
+        memcpy(db->owned.owned_car_ids, car_ids, car_idx * sizeof(int));
+        db->owned.owned_car_count = car_idx;
     }
     if (track_idx > 0) {
         db->owned.owned_track_ids = malloc(track_idx * sizeof(int));
-        if (db->owned.owned_track_ids) {
-            memcpy(db->owned.owned_track_ids, track_ids, track_idx * sizeof(int));
-            db->owned.owned_track_count = track_idx;
+        if (!db->owned.owned_track_ids) {
+            free(car_ids);
+            free(track_ids);
+            json_free(data);
+            return API_ERROR_INVALID_RESPONSE;
         }
+        memcpy(db->owned.owned_track_ids, track_ids, track_idx * sizeof(int));
+        db->owned.owned_track_count = track_idx;
     }
 
     free(car_ids);
@@ -1028,6 +1036,9 @@ api_error api_fetch_race_guide(iracing_api *api, ira_database *db)
     }
 
     int count = json_array_length(sessions_arr);
+
+    /* Sanity check — race guide should never have thousands of sessions */
+    if (count > 2000) count = 2000;
 
     /* Free existing race guide data */
     if (db->race_guide) {
@@ -1069,7 +1080,7 @@ api_error api_fetch_race_guide(iracing_api *api, ira_database *db)
                     stm.tm_hour = sh;
                     stm.tm_min = smi;
                     stm.tm_sec = ss;
-                    session->start_time = mktime(&stm);
+                    session->start_time = _mkgmtime(&stm);
                 }
             }
 
@@ -1085,7 +1096,7 @@ api_error api_fetch_race_guide(iracing_api *api, ira_database *db)
                     etm.tm_hour = eh;
                     etm.tm_min = emi;
                     etm.tm_sec = es;
-                    session->end_time = mktime(&etm);
+                    session->end_time = _mkgmtime(&etm);
                 }
             }
         }
@@ -1096,44 +1107,27 @@ api_error api_fetch_race_guide(iracing_api *api, ira_database *db)
     return API_OK;
 }
 
-api_error api_fetch_session_registrations(iracing_api *api, int session_id, int *count)
+api_error api_fetch_session_registrations(iracing_api *api, ira_database *db,
+                                          int session_id, int *count)
 {
     if (!api) return API_ERROR_NOT_AUTHENTICATED;
+    if (!api_is_authenticated(api)) return API_ERROR_NOT_AUTHENTICATED;
     if (count) *count = 0;
 
     /*
      * Session registration counts come from the race guide's entry_count field.
-     * Look up from cached race guide data; the caller is responsible for
-     * ensuring the race guide is loaded (via api_fetch_race_guide).
+     * If the race guide is stale or empty, fetch it first.
      */
-
-    json_value *data = fetch_data_endpoint(api, API_SEASON_RACE_GUIDE);
-    if (!data) return api->last_error;
-
-    json_value *sessions_arr = json_object_get(data, "sessions");
-    if (!sessions_arr || json_get_type(sessions_arr) != JSON_ARRAY) {
-        json_free(data);
-        api->last_error = API_ERROR_INVALID_RESPONSE;
-        snprintf(api->last_error_msg, sizeof(api->last_error_msg),
-                 "Session registrations: expected sessions array");
-        return API_ERROR_INVALID_RESPONSE;
+    if (database_race_guide_stale(db, 5)) {
+        api_error err = api_fetch_race_guide(api, db);
+        if (err != API_OK) return err;
     }
 
-    int n = json_array_length(sessions_arr);
-    for (int i = 0; i < n; i++) {
-        json_value *s = json_array_get(sessions_arr, i);
-        if (!s) continue;
-
-        if (json_get_int(json_object_get(s, "session_id")) == session_id) {
-            if (count) *count = json_get_int(json_object_get(s, "entry_count"));
-            json_free(data);
-            return API_OK;
-        }
+    int entry = database_race_guide_entry_count(db, session_id);
+    if (entry >= 0) {
+        if (count) *count = entry;
     }
 
-    /* Session not found in race guide (may have ended or not started yet) */
-    json_free(data);
-    if (count) *count = 0;
     return API_OK;
 }
 

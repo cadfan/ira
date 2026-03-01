@@ -167,8 +167,8 @@ api_error api_fetch_owned_content(iracing_api *api, ira_database *db);
 /* Fetch race guide (upcoming races in next 3 hours) */
 api_error api_fetch_race_guide(iracing_api *api, ira_database *db);
 
-/* Fetch registration count for a session */
-api_error api_fetch_session_registrations(iracing_api *api, int session_id, int *count);
+/* Get registration count for a session from cached race guide data */
+api_error api_fetch_session_registrations(iracing_api *api, ira_database *db, int session_id, int *count);
 
 /*
  * Convenience Functions
