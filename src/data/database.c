@@ -24,6 +24,7 @@
 #define SEASONS_FILE     "seasons.json"
 #define OWNED_FILE       "owned_content.json"
 #define FILTER_FILE      "filter.json"
+#define RACE_GUIDE_FILE  "race_guide.json"
 
 /* Static path buffers */
 static char g_tracks_path[MAX_PATH];
@@ -33,6 +34,7 @@ static char g_series_path[MAX_PATH];
 static char g_seasons_path[MAX_PATH];
 static char g_owned_path[MAX_PATH];
 static char g_filter_path[MAX_PATH];
+static char g_race_guide_path[MAX_PATH];
 static bool g_paths_initialized = false;
 
 /*
@@ -56,6 +58,7 @@ static void init_paths(void)
             snprintf(g_seasons_path, MAX_PATH, "%s\\%s", exe_path, SEASONS_FILE);
             snprintf(g_owned_path, MAX_PATH, "%s\\%s", exe_path, OWNED_FILE);
             snprintf(g_filter_path, MAX_PATH, "%s\\%s", exe_path, FILTER_FILE);
+            snprintf(g_race_guide_path, MAX_PATH, "%s\\%s", exe_path, RACE_GUIDE_FILE);
             g_paths_initialized = true;
             return;
         }
@@ -69,6 +72,7 @@ static void init_paths(void)
     strncpy(g_seasons_path, SEASONS_FILE, MAX_PATH);
     strncpy(g_owned_path, OWNED_FILE, MAX_PATH);
     strncpy(g_filter_path, FILTER_FILE, MAX_PATH);
+    strncpy(g_race_guide_path, RACE_GUIDE_FILE, MAX_PATH);
     g_paths_initialized = true;
 }
 
@@ -116,6 +120,12 @@ const char *database_get_filter_path(void)
 {
     init_paths();
     return g_filter_path;
+}
+
+const char *database_get_race_guide_path(void)
+{
+    init_paths();
+    return g_race_guide_path;
 }
 
 /*
@@ -168,6 +178,11 @@ void database_destroy(ira_database *db)
             season_free_schedule(&db->seasons[i]);
         }
         free(db->seasons);
+    }
+
+    /* Free race guide */
+    if (db->race_guide) {
+        free(db->race_guide);
     }
 
     /* Free owned content */
@@ -1319,4 +1334,143 @@ bool database_owns_season_content(ira_database *db, ira_season *season)
     }
 
     return has_car;
+}
+
+/*
+ * Race guide lookup
+ */
+int database_race_guide_entry_count(ira_database *db, int session_id)
+{
+    if (!db || !db->race_guide) return -1;
+
+    for (int i = 0; i < db->race_guide_count; i++) {
+        if (db->race_guide[i].session_id == session_id) {
+            return db->race_guide[i].entry_count;
+        }
+    }
+
+    return -1;
+}
+
+/*
+ * Race guide staleness check (uses minutes, not hours)
+ */
+bool database_race_guide_stale(ira_database *db, int max_age_mins)
+{
+    if (!db || db->race_guide_updated == 0) return true;
+    return difftime(time(NULL), db->race_guide_updated) > max_age_mins * 60;
+}
+
+/*
+ * Save race guide to JSON
+ */
+bool database_save_race_guide(ira_database *db, const char *filename)
+{
+    if (!db || !filename) return false;
+
+    json_value *root = json_new_object();
+    if (!root) return false;
+
+    char timestamp[32];
+    format_timestamp(db->race_guide_updated, timestamp, sizeof(timestamp));
+    json_object_set(root, "last_updated", json_new_string(timestamp));
+
+    json_value *sessions_arr = json_new_array();
+    if (!sessions_arr) {
+        json_free(root);
+        return false;
+    }
+
+    for (int i = 0; i < db->race_guide_count; i++) {
+        ira_race_guide_session *s = &db->race_guide[i];
+        json_value *obj = json_new_object();
+
+        json_object_set(obj, "session_id", json_new_number(s->session_id));
+        json_object_set(obj, "season_id", json_new_number(s->season_id));
+        json_object_set(obj, "series_id", json_new_number(s->series_id));
+        json_object_set(obj, "race_week_num", json_new_number(s->race_week_num));
+        json_object_set(obj, "entry_count", json_new_number(s->entry_count));
+        json_object_set(obj, "super_session", json_new_bool(s->super_session));
+
+        if (s->start_time > 0) {
+            char ts[32];
+            format_timestamp(s->start_time, ts, sizeof(ts));
+            json_object_set(obj, "start_time", json_new_string(ts));
+        }
+        if (s->end_time > 0) {
+            char ts[32];
+            format_timestamp(s->end_time, ts, sizeof(ts));
+            json_object_set(obj, "end_time", json_new_string(ts));
+        }
+
+        json_array_push(sessions_arr, obj);
+    }
+
+    json_object_set(root, "sessions", sessions_arr);
+
+    bool result = json_write_file(root, filename, true);
+    json_free(root);
+    return result;
+}
+
+/*
+ * Load race guide from JSON
+ */
+bool database_load_race_guide(ira_database *db, const char *filename)
+{
+    if (!db || !filename) return false;
+
+    json_value *root = json_parse_file(filename);
+    if (!root) return false;
+
+    json_value *updated = json_object_get(root, "last_updated");
+    if (updated && json_get_type(updated) == JSON_STRING) {
+        db->race_guide_updated = parse_timestamp(json_get_string(updated));
+    }
+
+    json_value *sessions_arr = json_object_get(root, "sessions");
+    if (!sessions_arr || json_get_type(sessions_arr) != JSON_ARRAY) {
+        json_free(root);
+        return true;
+    }
+
+    int count = json_array_length(sessions_arr);
+
+    /* Free existing */
+    if (db->race_guide) {
+        free(db->race_guide);
+        db->race_guide = NULL;
+        db->race_guide_count = 0;
+    }
+
+    if (count > 0) {
+        db->race_guide = calloc(count, sizeof(ira_race_guide_session));
+        if (!db->race_guide) {
+            json_free(root);
+            return false;
+        }
+        db->race_guide_count = count;
+
+        for (int i = 0; i < count; i++) {
+            json_value *s = json_array_get(sessions_arr, i);
+            if (!s) continue;
+
+            ira_race_guide_session *session = &db->race_guide[i];
+            session->session_id = json_get_int(json_object_get(s, "session_id"));
+            session->season_id = json_get_int(json_object_get(s, "season_id"));
+            session->series_id = json_get_int(json_object_get(s, "series_id"));
+            session->race_week_num = json_get_int(json_object_get(s, "race_week_num"));
+            session->entry_count = json_get_int(json_object_get(s, "entry_count"));
+            session->super_session = json_get_bool(json_object_get(s, "super_session"));
+
+            const char *st = json_get_string(json_object_get(s, "start_time"));
+            if (st) session->start_time = parse_timestamp(st);
+
+            const char *et = json_get_string(json_object_get(s, "end_time"));
+            if (et) session->end_time = parse_timestamp(et);
+        }
+    }
+
+    json_free(root);
+    return true;
 }

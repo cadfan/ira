@@ -317,14 +317,13 @@ api_error api_authenticate(iracing_api *api)
         }
     }
 
-    /* Legacy auth was retired by iRacing on December 9, 2025.
-     * All API access now requires OAuth2. */
-    api->last_error = API_ERROR_NOT_IMPLEMENTED;
+    /* No OAuth client configured — cannot authenticate */
+    api->last_error = API_ERROR_NOT_AUTHENTICATED;
     snprintf(api->last_error_msg, sizeof(api->last_error_msg),
-             "Legacy authentication was retired by iRacing (Dec 2025). "
-             "Use api_set_oauth() for OAuth2 authentication.");
+             "No OAuth credentials configured. "
+             "Call api_set_oauth() before authenticating.");
     api->state = AUTH_STATE_FAILED;
-    return API_ERROR_NOT_IMPLEMENTED;
+    return API_ERROR_NOT_AUTHENTICATED;
 }
 
 api_error api_refresh_token(iracing_api *api)
@@ -947,24 +946,130 @@ api_error api_fetch_owned_content(iracing_api *api, ira_database *db)
 
 api_error api_fetch_race_guide(iracing_api *api, ira_database *db)
 {
-    (void)db;
     if (!api) return API_ERROR_NOT_AUTHENTICATED;
     if (!api_is_authenticated(api)) return API_ERROR_NOT_AUTHENTICATED;
 
-    /* TODO: Implement race guide parsing */
-    api->last_error = API_ERROR_NOT_IMPLEMENTED;
-    return API_ERROR_NOT_IMPLEMENTED;
+    json_value *data = fetch_data_endpoint(api, API_SEASON_RACE_GUIDE);
+    if (!data) return api->last_error;
+
+    /* Response is an object with "sessions" array */
+    json_value *sessions_arr = json_object_get(data, "sessions");
+    if (!sessions_arr || json_get_type(sessions_arr) != JSON_ARRAY) {
+        json_free(data);
+        api->last_error = API_ERROR_INVALID_RESPONSE;
+        snprintf(api->last_error_msg, sizeof(api->last_error_msg),
+                 "Race guide: expected sessions array");
+        return API_ERROR_INVALID_RESPONSE;
+    }
+
+    int count = json_array_length(sessions_arr);
+
+    /* Free existing race guide data */
+    if (db->race_guide) {
+        free(db->race_guide);
+        db->race_guide = NULL;
+        db->race_guide_count = 0;
+    }
+
+    if (count > 0) {
+        db->race_guide = calloc(count, sizeof(ira_race_guide_session));
+        if (!db->race_guide) {
+            json_free(data);
+            return API_ERROR_INVALID_RESPONSE;
+        }
+        db->race_guide_count = count;
+
+        for (int i = 0; i < count; i++) {
+            json_value *s = json_array_get(sessions_arr, i);
+            if (!s) continue;
+
+            ira_race_guide_session *session = &db->race_guide[i];
+            session->session_id = json_get_int(json_object_get(s, "session_id"));
+            session->season_id = json_get_int(json_object_get(s, "season_id"));
+            session->series_id = json_get_int(json_object_get(s, "series_id"));
+            session->race_week_num = json_get_int(json_object_get(s, "race_week_num"));
+            session->entry_count = json_get_int(json_object_get(s, "entry_count"));
+            session->super_session = json_get_bool(json_object_get(s, "super_session"));
+
+            /* Parse ISO timestamps */
+            const char *start_str = json_get_string(json_object_get(s, "start_time"));
+            if (start_str) {
+                struct tm stm = {0};
+                int sy, smo, sd, sh, smi, ss;
+                if (sscanf(start_str, "%d-%d-%dT%d:%d:%d",
+                           &sy, &smo, &sd, &sh, &smi, &ss) >= 3) {
+                    stm.tm_year = sy - 1900;
+                    stm.tm_mon = smo - 1;
+                    stm.tm_mday = sd;
+                    stm.tm_hour = sh;
+                    stm.tm_min = smi;
+                    stm.tm_sec = ss;
+                    session->start_time = mktime(&stm);
+                }
+            }
+
+            const char *end_str = json_get_string(json_object_get(s, "end_time"));
+            if (end_str) {
+                struct tm etm = {0};
+                int ey, emo, ed, eh, emi, es;
+                if (sscanf(end_str, "%d-%d-%dT%d:%d:%d",
+                           &ey, &emo, &ed, &eh, &emi, &es) >= 3) {
+                    etm.tm_year = ey - 1900;
+                    etm.tm_mon = emo - 1;
+                    etm.tm_mday = ed;
+                    etm.tm_hour = eh;
+                    etm.tm_min = emi;
+                    etm.tm_sec = es;
+                    session->end_time = mktime(&etm);
+                }
+            }
+        }
+    }
+
+    db->race_guide_updated = time(NULL);
+    json_free(data);
+    return API_OK;
 }
 
 api_error api_fetch_session_registrations(iracing_api *api, int session_id, int *count)
 {
-    (void)session_id;
     if (!api) return API_ERROR_NOT_AUTHENTICATED;
     if (count) *count = 0;
 
-    /* TODO: Implement session registrations */
-    api->last_error = API_ERROR_NOT_IMPLEMENTED;
-    return API_ERROR_NOT_IMPLEMENTED;
+    /*
+     * Session registration counts come from the race guide's entry_count field.
+     * Look up from cached race guide data; the caller is responsible for
+     * ensuring the race guide is loaded (via api_fetch_race_guide).
+     */
+
+    json_value *data = fetch_data_endpoint(api, API_SEASON_RACE_GUIDE);
+    if (!data) return api->last_error;
+
+    json_value *sessions_arr = json_object_get(data, "sessions");
+    if (!sessions_arr || json_get_type(sessions_arr) != JSON_ARRAY) {
+        json_free(data);
+        api->last_error = API_ERROR_INVALID_RESPONSE;
+        snprintf(api->last_error_msg, sizeof(api->last_error_msg),
+                 "Session registrations: expected sessions array");
+        return API_ERROR_INVALID_RESPONSE;
+    }
+
+    int n = json_array_length(sessions_arr);
+    for (int i = 0; i < n; i++) {
+        json_value *s = json_array_get(sessions_arr, i);
+        if (!s) continue;
+
+        if (json_get_int(json_object_get(s, "session_id")) == session_id) {
+            if (count) *count = json_get_int(json_object_get(s, "entry_count"));
+            json_free(data);
+            return API_OK;
+        }
+    }
+
+    /* Session not found in race guide (may have ended or not started yet) */
+    json_free(data);
+    if (count) *count = 0;
+    return API_OK;
 }
 
 /*
@@ -1058,7 +1163,6 @@ const char *api_error_string(api_error err)
         case API_ERROR_TIMEOUT:           return "Request timeout";
         case API_ERROR_SERVER_ERROR:      return "Server error";
         case API_ERROR_INVALID_RESPONSE:  return "Invalid response";
-        case API_ERROR_NOT_IMPLEMENTED:   return "Not implemented";
         default:                          return "Unknown error";
     }
 }

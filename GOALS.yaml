@@ -1,0 +1,33 @@
+# ira Fitness Goals
+# Measurable checks that evolve cycles improve against
+
+goals:
+  - id: build-clean
+    description: Project builds with zero warnings
+    weight: 10
+    check: "meson compile -C build 2>&1 | grep -ci warning"
+    pass_when: "exit_code == 0 && output == '0'"
+
+  - id: no-api-stubs
+    description: No API endpoints return API_ERROR_NOT_IMPLEMENTED
+    weight: 8
+    check: "grep -rn 'return API_ERROR_NOT_IMPLEMENTED' src/api/ | grep -v 'Legacy auth' | wc -l"
+    pass_when: "output == '0'"
+
+  - id: next-race-time
+    description: filter_next_race_time uses real schedule data, not a placeholder
+    weight: 7
+    check: "grep -c 'return time(NULL)' src/filter/race_filter.c"
+    pass_when: "output == '0'"
+
+  - id: owned-content-real
+    description: api_fetch_owned_content fetches actual purchase data, not just free content
+    weight: 6
+    check: "grep -A5 'api_fetch_owned_content' src/api/iracing_api.c | grep -c 'fetch_data_endpoint'"
+    pass_when: "output >= '1'"
+
+  - id: test-suite
+    description: At least one test target exists in the build system
+    weight: 5
+    check: "grep -c 'test(' meson.build"
+    pass_when: "output >= '1'"

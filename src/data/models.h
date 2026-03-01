@@ -162,6 +162,20 @@ typedef struct {
 } ira_season;
 
 /*
+ * Race Guide Session (upcoming race in next 3 hours)
+ */
+typedef struct {
+    int session_id;
+    int season_id;
+    int series_id;
+    int race_week_num;
+    time_t start_time;
+    time_t end_time;
+    int entry_count;
+    bool super_session;
+} ira_race_guide_session;
+
+/*
  * Owned Content (user's inventory)
  */
 typedef struct {

@@ -44,6 +44,11 @@ typedef struct {
     int season_quarter;
     time_t seasons_updated;
 
+    /* Race guide (upcoming sessions, short-lived cache) */
+    ira_race_guide_session *race_guide;
+    int race_guide_count;
+    time_t race_guide_updated;
+
     /* User's owned content */
     ira_owned_content owned;
 
@@ -80,6 +85,7 @@ bool database_load_series(ira_database *db, const char *filename);
 bool database_load_seasons(ira_database *db, const char *filename);
 bool database_load_owned(ira_database *db, const char *filename);
 bool database_load_filter(ira_database *db, const char *filename);
+bool database_load_race_guide(ira_database *db, const char *filename);
 
 /* Individual save functions */
 bool database_save_tracks(ira_database *db, const char *filename);
@@ -89,6 +95,7 @@ bool database_save_series(ira_database *db, const char *filename);
 bool database_save_seasons(ira_database *db, const char *filename);
 bool database_save_owned(ira_database *db, const char *filename);
 bool database_save_filter(ira_database *db, const char *filename);
+bool database_save_race_guide(ira_database *db, const char *filename);
 
 /*
  * Lookups
@@ -123,6 +130,13 @@ bool database_owns_track(ira_database *db, int track_id);
 bool database_owns_season_content(ira_database *db, ira_season *season);
 
 /*
+ * Race guide lookups
+ */
+
+/* Find entry count for a session in the cached race guide, returns -1 if not found */
+int database_race_guide_entry_count(ira_database *db, int session_id);
+
+/*
  * Data age checks
  */
 
@@ -138,6 +152,9 @@ bool database_car_classes_stale(ira_database *db, int max_age_hours);
 /* Check if seasons data needs refresh */
 bool database_seasons_stale(ira_database *db, int max_age_hours);
 
+/* Check if race guide data needs refresh (short cache - minutes) */
+bool database_race_guide_stale(ira_database *db, int max_age_mins);
+
 /*
  * Default file paths (relative to executable)
  */
@@ -149,5 +166,6 @@ const char *database_get_series_path(void);
 const char *database_get_seasons_path(void);
 const char *database_get_owned_path(void);
 const char *database_get_filter_path(void);
+const char *database_get_race_guide_path(void);
 
 #endif /* IRA_DATABASE_H */
