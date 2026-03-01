@@ -475,21 +475,31 @@ const char *filter_match_to_string(filter_match_flags flags)
 }
 
 /*
- * Calculate next race start time
- * TODO: This needs actual schedule data from the API
+ * Calculate next race start time from schedule repeat interval
  */
 time_t filter_next_race_time(ira_season *season, ira_schedule_week *week)
 {
     (void)season;
-    (void)week;
 
-    /* For now, return current time as placeholder */
-    /* Real implementation would calculate based on:
-     * - Race start interval (e.g., every 2 hours)
-     * - Current time
-     * - Week start/end dates
-     */
-    return time(NULL);
+    if (!week || week->repeat_mins <= 0 || week->start_date <= 0) {
+        return 0;
+    }
+
+    time_t now = time(NULL);
+    int repeat_secs = week->repeat_mins * 60;
+
+    /* Calculate how many intervals have passed since start_date */
+    double elapsed = difftime(now, week->start_date);
+    if (elapsed < 0) {
+        /* Week hasn't started yet — first race is start_date */
+        return week->start_date;
+    }
+
+    /* Find the next interval boundary after now */
+    long intervals_passed = (long)(elapsed / repeat_secs);
+    time_t next = week->start_date + (time_t)((intervals_passed + 1) * repeat_secs);
+
+    return next;
 }
 
 /*
